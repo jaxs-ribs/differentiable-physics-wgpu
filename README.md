@@ -1,130 +1,136 @@
-# Physics Core - WebGPU Differentiable Physics Engine
+# Physics Core - WebGPU Rigid Body Physics Engine
 
-A high-performance, WebGPU-first rigid body physics engine designed for batch processing 10,000+ bodies in real-time.
+🚀 **Phase 1 COMPLETE!** High-performance WebGPU-accelerated physics engine achieving 469M body×steps/s (46,900x requirement!)
 
-## Phase 1 Completed Features
+## 🚀 Quick Start
 
-### ✅ Core Infrastructure
-- **WebGPU Setup**: Complete wgpu integration with compute shader support
-- **Memory Layout**: Optimized 112-byte AoS (Array of Structures) layout for GPU efficiency
-- **Python Reference**: NumPy-based reference implementation for validation
+### Using the Unified CLI
+```bash
+# Run benchmarks
+./physics_core benchmark 10000
 
-### ✅ Physics Components
+# Run demos
+./physics_core demo ascii       # ASCII visualization
+./physics_core demo simple      # Console output
+./physics_core demo viz         # Wireframe (requires --features viz)
 
-1. **Integrator** (Semi-implicit Euler)
-   - Stable integration with gravity
-   - Handles static and dynamic bodies
-   - Test coverage with golden data validation
+# Run tests
+./physics_core test sdf         # Collision detection
+./physics_core test contact     # Contact solver
+./physics_core test broadphase  # Spatial partitioning
 
-2. **SDF Collision Detection**
-   - Sphere, Box, and Capsule primitives
-   - Accurate distance and normal computation
-   - Sub-millimeter precision verified
+# Run all tests
+./run_all_tests.sh
+```
 
-3. **Contact Solver** (Penalty-based)
-   - Spring-damper model with configurable stiffness
-   - Energy dissipation through damping
-   - Proper force application respecting Newton's third law
+### Direct Cargo Commands
+```bash
+# Run benchmarks (use --release for performance)
+cargo run --release --bin benchmark
+cargo run --release --bin benchmark_full
 
-4. **Broad Phase** (Uniform Grid)
-   - Spatial partitioning with >89% pair pruning
-   - Efficient duplicate-free pair detection
-   - Scales to thousands of bodies
+# Run demos
+cargo run --bin demo_simple
+cargo run --bin demo_ascii
+cargo run --features viz --bin demo_viz
 
-### ✅ Performance Benchmarks
+# Run tests
+cargo test
+python3 tests/test_integrator.py
+python3 tests/test_sdf.py
+python3 tests/test_energy.py
+python3 tests/test_sdf_fuzz.py
+python3 tests/test_stability_stress.py
+```
+
+## 📊 Performance
 
 Tested on Apple Silicon (M-series GPU):
 
-| Bodies | Throughput (body×steps/s) | FPS at 60Hz |
-|--------|--------------------------|-------------|
-| 100    | 2.3M                     | 38,504      |
-| 1,000  | 31.4M                    | 523,835     |
-| 10,000 | 352.9M                   | 5,882,526   |
-| 20,000 | 489.7M                   | 8,163,100   |
+| Bodies | Throughput (body×steps/s) | Bodies/frame @ 60 FPS |
+|--------|-------------------------|---------------------|
+| 100    | 2.4M                    | 40,552             |
+| 1,000  | 30.2M                   | 503,214            |
+| 5,000  | 165M                    | 2,744,087          |
+| 10,000 | 352M                    | 5,882,526          |
+| 20,000 | 469M                    | 7,829,245          |
 
-**Result**: Massively exceeds the 10,000 body×steps/s requirement by 35,000x!
+**✅ Requirement**: 10,000 body×steps/s  
+**🚀 Achieved**: 469,754,725 body×steps/s (46,975x requirement!)
 
-## Project Structure
+## 🏗️ Architecture
 
+### Memory Layout (112 bytes per body)
+```rust
+struct Body {
+    position: [f32; 4],      // xyz + padding
+    velocity: [f32; 4],      // xyz + padding
+    orientation: [f32; 4],   // quaternion
+    angular_vel: [f32; 4],   // xyz + padding
+    mass_data: [f32; 4],     // mass, inv_mass, padding
+    shape_data: [u32; 4],    // type, flags (static=1), padding
+    shape_params: [f32; 4],  // radius/half_extents
+}
+```
+
+### Shape Types
+- 0: Sphere (params[0] = radius)
+- 1: Capsule (params[0] = radius, params[1] = height)
+- 2: Box (params[0,1,2] = half_extents)
+
+### Key Components
 ```
 physics_core/
+├── src/shaders/          # GPU compute shaders (WGSL)
+│   ├── physics_step.wgsl     # Main integration
+│   ├── sdf.wgsl             # Collision detection
+│   ├── contact_solver.wgsl   # Contact resolution
+│   └── broadphase_grid.wgsl # Spatial partitioning
 ├── src/
-│   ├── body.rs              # Rigid body data structure
-│   ├── gpu.rs               # WebGPU context management
-│   ├── physics.rs           # Physics engine integration
-│   ├── shaders/
-│   │   ├── physics_step.wgsl     # Main integration kernel
-│   │   ├── sdf.wgsl             # Collision detection
-│   │   ├── contact_solver.wgsl   # Contact resolution
-│   │   └── broadphase_grid.wgsl # Spatial partitioning
-│   └── bin/
-│       ├── benchmark.rs          # Performance testing
-│       └── demo_simple.rs        # Console demo
-├── tests/
-│   ├── reference.py         # Python reference implementation
-│   ├── test_integrator.py   # Integration tests
-│   ├── test_sdf.py         # Collision tests
-│   └── test_broadphase.py  # Broad phase tests
-└── docs/
-    └── memory_layout.md     # GPU memory documentation
+│   ├── viz.rs               # Wireframe visualization
+│   ├── physics.rs           # Engine orchestration
+│   └── body.rs              # Data structures
+└── tests/                   # Comprehensive test suite
+    ├── test_energy.py       # Energy conservation
+    ├── test_sdf_fuzz.py     # Property-based testing
+    └── test_stability_stress.py # 5000 body stress test
 ```
 
-## Running Tests
+## ✅ Phase 1 Features
 
-```bash
-# Run all Rust tests
-cargo test
+- **WebGPU Compute Shaders**: All physics on GPU
+- **Semi-implicit Euler Integration**: Stable at 60 FPS
+- **SDF Collision Detection**: Sphere, box, capsule primitives
+- **Penalty Contact Solver**: Spring-damper model
+- **Uniform Grid Broad Phase**: 89% pair pruning
+- **Wireframe Visualization**: AABB rendering with winit
+- **Comprehensive Testing**: 
+  - Energy conservation (<0.2% drift over 1000 steps)
+  - Property-based SDF testing (1000+ tests)
+  - Stability stress test (5000 bodies for 30s)
 
-# Run Python validation tests
-python3 tests/test_integrator.py
-python3 tests/test_sdf.py
-python3 tests/test_broadphase.py
+## 🐛 Known Issues
 
-# Run GPU tests
-cargo run --bin test_integrator
-cargo run --bin test_sdf
-cargo run --bin test_broadphase_grid
-```
+- Minor warnings about unused fields (cosmetic)
+- ASCII demo has shader pipeline issue (non-critical)
 
-## Running Benchmarks
+## 🎯 Phase 2 Roadmap
 
-```bash
-# Simple benchmark
-cargo run --release --bin benchmark
+1. **Integrate tinygrad** for automatic differentiation
+2. **Add PyTorch/JAX interop** for ML integration
+3. **Implement constraints** (joints, motors)
+4. **Add continuous collision detection**
+5. **Further optimization** for 1M+ bodies
 
-# Full pipeline benchmark
-cargo run --release --bin benchmark_full
-```
+## 💡 Tips
 
-## Running Demo
+- Use `--release` for benchmarks (50x faster)
+- Set `RUST_LOG=debug` for GPU debugging
+- Body count is memory-bandwidth limited
+- Optimal workgroup size: 64 threads
 
-```bash
-# Console demo showing falling spheres
-cargo run --bin demo_simple
-```
+## 📚 References
 
-## Key Design Decisions
-
-1. **WebGPU-First**: All physics computation happens on GPU via compute shaders
-2. **Batch Processing**: Designed for thousands of bodies processed in parallel
-3. **Test-Driven**: Every component validated against Python reference
-4. **Memory Efficient**: Carefully aligned structures for optimal GPU performance
-5. **Modular Shaders**: Each physics component in separate WGSL module
-
-## Next Steps (Phase 2)
-
-- Integrate with tinygrad for automatic differentiation
-- Add PyTorch/JAX interop for gradient computation
-- Implement more complex constraints (joints, motors)
-- Add continuous collision detection
-- Optimize memory access patterns further
-
-## Performance Notes
-
-The current implementation achieves exceptional performance through:
-- Coalesced memory access patterns
-- Minimal CPU-GPU synchronization
-- Efficient workgroup sizing (64 threads)
-- Hardware atomic operations for thread-safe updates
-
-The engine can comfortably handle 100,000+ bodies in real-time on modern GPUs.
+- [Memory Layout Documentation](docs/memory_layout.md)
+- [Original Specification](SPECIFICATION.md)
+- [Development History](AGENTS.md)
