@@ -70,12 +70,25 @@ impl MatrixOperations {
         ]
     }
     
-    fn normalize(v: [f32; 3]) -> [f32; 3] {
+    pub fn transform_point_homogeneous(matrix: &[[f32; 4]; 4], point: [f32; 3]) -> [f32; 4] {
+        let p4 = [point[0], point[1], point[2], 1.0];
+        let mut result = [0.0; 4];
+        
+        for i in 0..4 {
+            for j in 0..4 {
+                result[i] += matrix[i][j] * p4[j];
+            }
+        }
+        
+        result
+    }
+    
+    pub fn normalize(v: [f32; 3]) -> [f32; 3] {
         let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
         [v[0] / len, v[1] / len, v[2] / len]
     }
     
-    fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    pub fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
         [
             a[1] * b[2] - a[2] * b[1],
             a[2] * b[0] - a[0] * b[2],
@@ -83,7 +96,19 @@ impl MatrixOperations {
         ]
     }
     
-    fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    pub fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
         a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
     }
+}
+
+// Convenience functions for common operations
+pub fn print_matrix(m: &[[f32; 4]; 4]) {
+    for i in 0..4 {
+        println!("  [{:8.3} {:8.3} {:8.3} {:8.3}]", m[i][0], m[i][1], m[i][2], m[i][3]);
+    }
+}
+
+pub fn print_matrix_with_label(label: &str, m: &[[f32; 4]; 4]) {
+    println!("{}:", label);
+    print_matrix(m);
 }

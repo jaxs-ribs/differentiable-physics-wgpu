@@ -31,10 +31,7 @@ impl GpuPipeline {
     }
     
     fn load_shader(gpu: &GpuContext) -> wgpu::ShaderModule {
-        gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Physics Step Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/physics_step.wgsl").into()),
-        })
+        crate::shaders::load_shader(&gpu.device, "physics_step")
     }
     
     fn create_bind_group_layout(gpu: &GpuContext) -> BindGroupLayout {
