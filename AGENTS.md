@@ -79,7 +79,32 @@ This roadmap outlines the concrete, time-boxed deliverables from the initial eng
 - **Test Suite:**
     - Unit maths, golden single step, golden 1,000-step free-fall, property fuzzing, stability stress test, performance guardrail.
 
-## 4. Current Status & Technical Details (Phase 1 Complete)
+## 4. Quick Development Reference
+
+### Essential Scripts (Phase 1 Complete)
+```bash
+./pc-test    # Run all tests (unit, GPU, Python, fuzz)
+./pc-bench   # Run benchmarks (add body count as arg)
+./pc-demo    # Run visualization (add: simple, ascii, viz)
+```
+
+### Common Tasks
+```bash
+# Quick validation
+./pc-test && ./pc-bench 10000
+
+# See the engine in action
+./pc-demo viz
+
+# Full benchmark suite
+cargo run --release --bin benchmark_full
+
+# Specific Python tests
+python3 tests/test_energy.py
+python3 tests/test_sdf_fuzz.py
+```
+
+## 5. Current Status & Technical Details (Phase 1 Complete)
 
 ### Performance Achieved
 - **~630M body×steps/s** with 20,000 bodies.

@@ -1,24 +1,23 @@
 # Differentiable Physics Engine
 
-A WebGPU-first, batch-differentiable rigid-body simulator designed for high-throughput reinforcement learning and evolutionary robotics. This engine runs entirely on the GPU, enabling massive parallelism for simulations involving tens of thousands of objects.
+A rigid-body physics engine designed for GPU execution via WebGPU (`wgpu`). The primary goal is to serve as a high-performance, differentiable custom operator within machine learning frameworks like `tinygrad`.
 
-This project is currently in **Phase 1: Complete**, resulting in a high-performance, stand-alone Rust and WGSL physics engine.
+This project is currently at the end of **Phase 1**, resulting in a functional, stand-alone Rust/WGSL physics engine.
 
-## Core Features
+## Core Components
 
-- **Massively Parallel Architecture:** Built from the ground up for the GPU using WebGPU (via `wgpu`) and WGSL shaders.
-- **High Performance:** Achieves over **600 million** body-steps per second on consumer hardware. See [Performance](#performance) for details.
-- **Core Physics Primitives:**
+- **GPU Compute Pipeline:** Physics steps execute entirely on the GPU using WGSL compute shaders.
+- **Physics Primitives:**
     - Semi-implicit Euler integration
-    - Analytic Signed Distance Function (SDF) collision detection (Sphere, Capsule, Box)
-    - Penalty-based contact resolution
-    - Uniform grid broad-phase for efficient collision pair pruning
-- **Comprehensive Test Suite:** Behavior is locked in against a Python/NumPy golden reference, with property-based fuzz testing and stability stress tests.
-- **Minimal Wireframe Visualization:** An optional, lightweight `winit`-based viewer for debugging simulation state directly from GPU memory.
+    - Signed Distance Function (SDF) collision detection for sphere, capsule, and box shapes.
+    - A penalty-based contact model for resolving collisions.
+    - A uniform grid broad-phase to minimize collision checks.
+- **Testing:** The GPU implementation is validated against a Python/NumPy reference implementation. The test suite includes property-based fuzzing for SDFs and multi-body stability tests.
+- **Debug Viewer:** An optional `winit`-based wireframe viewer renders body AABBs directly from GPU memory.
 
 ## Performance
 
-The engine is memory-bandwidth limited and scales linearly with the number of bodies. Benchmarks were run on a consumer-grade GPU.
+Benchmarks run on a single consumer-grade GPU, measuring throughput in simulated bodies multiplied by simulation steps per second.
 
 | Body Count | Throughput (body-steps/s) |
 | :--- | :--- |
@@ -35,68 +34,66 @@ The engine is memory-bandwidth limited and scales linearly with the number of bo
 
 ### Usage
 
-The project is controlled via a unified command-line interface.
+Three simple scripts for everything:
 
 ```bash
 # Clone the repository
 git clone <repository-url>
 cd physicsengine/physics_core
 
-# Run the benchmark suite
-./physics_core benchmark
+# Run all tests
+./pc-test
 
-# Run the wireframe visualization demo
-./physics_core demo viz
+# Run benchmarks
+./pc-bench
+./pc-bench 10000        # Specific body count
 
-# Run the full test suite (Rust and Python)
-./run_all_tests.sh
+# Run demos
+./pc-demo               # 3D wireframe (default)
+./pc-demo simple        # Console output
+./pc-demo ascii         # ASCII visualization
 ```
 
-## Project Philosophy
+## Project Technical Goals
 
-1.  **Correctness, Then Speed:** Behavior is locked with an exhaustive test suite before any micro-optimization.
-2.  **No Hidden Host Hops:** The core simulation loop runs entirely on the GPU, with zero data transfer back to the CPU until explicitly needed.
-3.  **Single Source of Truth:** A single, GPU-resident buffer holds the state of all bodies, ensuring identical memory layouts between Rust and WGSL.
+1.  **Correctness via Testing:** The behavior of the GPU kernels is verified against a CPU-based NumPy reference implementation.
+2.  **GPU-Centric Execution:** The core simulation loop avoids CPU-GPU data transfer. State remains on the GPU until explicitly retrieved.
+3.  **Consistent Memory Layout:** The `Body` data structure is identical between Rust (`#[repr(C)]`) and WGSL to allow for zero-copy buffer mapping.
 
-## Roadmap
+## Technical Roadmap
 
-This project follows an ambitious, phased plan to evolve from a physics engine into a platform for cutting-edge AI research.
+-   **Phase 1 (Complete): Stand-Alone Engine**
+    -   **Outcome:** A functional Rust/WGSL physics simulator with a comprehensive test suite and validated performance.
 
--   **Phase 1: Stand-Alone Engine (Complete)**
-    -   **Status:** A high-performance, stand-alone Rust + WGSL simulator.
-    -   **Outcome:** Validated with an exhaustive test suite and benchmarked at over 600M body-steps/s.
+-   **Phase 2 (Current): `tinygrad` Integration**
+    -   **Objective:** Expose the WGSL physics kernels as custom operations in `tinygrad`.
+    -   **Tasks:**
+        -   Patch `tinygrad`'s WebGPU runtime to accept raw WGSL code.
+        -   Write a Python wrapper to dispatch the physics step as a tensor operation.
+        -   Verify the integration by training a simple policy for a control task (e.g., cart-pole).
 
--   **Phase 2: Tinygrad Integration & Autograd (Next)**
-    -   **Goal:** Achieve a full, end-to-end differentiable pipeline.
-    -   **Key Steps:**
-        -   Expose raw WGSL kernels as custom operations within `tinygrad`.
-        -   Implement a Python shim for dispatching physics steps as tensor operations.
-        -   Validate the gradient flow with a simple reinforcement learning task.
+-   **Phase 3: Differentiable Backward Pass**
+    -   **Objective:** Implement an efficient, analytic backward pass for the physics simulation.
+    -   **Tasks:**
+        -   Write WGSL kernels for the analytic Jacobians of the integrator and contact solver.
+        -   Validate the gradients against finite-difference approximations.
+        -   Use the backward pass in a Quality-Diversity (QD) optimization loop to find novel solutions to physical tasks.
 
--   **Phase 3: Differentiable Evolution & World Models**
-    -   **Goal:** Enable novel morphology and policy co-evolution.
-    -   **Key Steps:**
-        -   Implement an analytic backward pass (Jacobians) in WGSL for high-performance gradient calculation.
-        -   Integrate with pre-trained world models (e.g., DreamerV3) by using latent vectors (`z_t`) as the observation space.
-        -   Build a Quality-Diversity (QD) outer loop to search for novel morphologies driven by task reward and latent-space novelty.
+-   **Phase 4: Telemetry and Interaction**
+    -   **Objective:** Add capabilities for live monitoring and external control of the simulation.
+    -   **Tasks:**
+        -   Implement a WebSocket server to stream simulation state as JSON data.
+        -   Build a minimal web client to display the telemetry.
 
--   **Phase 4: Live Telemetry & Interactive Control**
-    -   **Goal:** Create a "live control center" for monitoring and interacting with simulations.
-    -   **Key Steps:**
-        -   Develop a WebSocket server to stream real-time telemetry from the simulation.
-        -   Build a minimal web-based dashboard for live visualization.
-        -   Prototype interactive control, allowing external agents (including LLMs) to pause, mutate, and resume simulations.
-
--   **Phase 5: Flagship Showcase & Publication**
-    -   **Goal:** Deliver a shippable, public demonstration and publish the results.
-    -   **Key Steps:**
-        -   Create a flagship demo showcasing emergent "ideal body" evolution.
-        -   Package the project for one-click deployment (e.g., Docker).
-        -   Publish an arXiv paper detailing the methods, performance, and findings.
+-   **Phase 5: Packaging and Documentation**
+    -   **Objective:** Produce a distributable artifact and a technical summary.
+    -   **Tasks:**
+        -   Package the simulation and UI into a container for simplified deployment.
+        -   Write a technical report detailing the methods, performance, and results.
 
 ## Development
 
-To contribute, ensure you can run the full test suite. It is the primary guardrail for correctness.
+All changes should be verified against the existing test suite.
 
 ```bash
 # Run all Rust and Python tests

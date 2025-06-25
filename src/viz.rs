@@ -92,9 +92,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         
         // Create uniform buffer for view-projection matrix
         let view_proj = create_view_proj_matrix(config.width as f32 / config.height as f32);
+        // Transpose for column-major WGSL
+        let view_proj_transposed = transpose_matrix(&view_proj);
         let uniform_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
-            contents: bytemuck::cast_slice(&[ViewProjection { view_proj }]),
+            contents: bytemuck::cast_slice(&[ViewProjection { view_proj: view_proj_transposed }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         
@@ -203,7 +205,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     pub fn update_bodies(&self, gpu: &GpuContext, bodies: &[Body]) {
         let mut vertices = Vec::new();
         
-        for body in bodies {
+        println!("Updating {} bodies for visualization", bodies.len());
+        
+        for (i, body) in bodies.iter().enumerate() {
             // Get AABB from body
             let pos = [body.position[0], body.position[1], body.position[2]];
             let (min, max) = match body.shape_data[0] {
@@ -219,8 +223,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     ([pos[0] - hx, pos[1] - hy, pos[2] - hz],
                      [pos[0] + hx, pos[1] + hy, pos[2] + hz])
                 },
-                _ => continue, // Skip unknown shapes
+                _ => {
+                    println!("  Body {}: Unknown shape type {}", i, body.shape_data[0]);
+                    continue;
+                }
             };
+            
+            if i < 3 {  // Debug first few bodies
+                println!("  Body {}: pos=({:.2}, {:.2}, {:.2}), AABB: min=({:.2}, {:.2}, {:.2}) max=({:.2}, {:.2}, {:.2})",
+                    i, pos[0], pos[1], pos[2], min[0], min[1], min[2], max[0], max[1], max[2]);
+            }
             
             let color = if body.shape_data[1] == 1 {
                 [0.5, 0.5, 0.5] // Gray for static
@@ -280,8 +292,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             vertices.extend_from_slice(&[corners[7][0], corners[7][1], corners[7][2], color[0], color[1], color[2]]);
         }
         
+        println!("Generated {} vertices ({} floats) for {} lines", 
+            vertices.len() / 6, vertices.len(), vertices.len() / 12);
+        
         if !vertices.is_empty() {
             gpu.queue.write_buffer(&self.line_buffer, 0, bytemuck::cast_slice(&vertices));
+        } else {
+            println!("WARNING: No vertices generated!");
         }
     }
     
@@ -317,6 +334,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.line_buffer.slice(..));
+            println!("Drawing {} vertices", vertex_count);
             render_pass.draw(0..vertex_count, 0..1);
         }
         
@@ -334,7 +352,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             
             // Update projection matrix
             let view_proj = create_view_proj_matrix(self.config.width as f32 / self.config.height as f32);
-            gpu.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[ViewProjection { view_proj }]));
+            let view_proj_transposed = transpose_matrix(&view_proj);
+            gpu.queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[ViewProjection { view_proj: view_proj_transposed }]));
         }
     }
     
@@ -344,22 +363,25 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 
 fn create_view_proj_matrix(aspect_ratio: f32) -> [[f32; 4]; 4] {
-    let proj = perspective_matrix(45.0_f32.to_radians(), aspect_ratio, 0.1, 100.0);
+    let proj = perspective_matrix(45.0_f32.to_radians(), aspect_ratio, 0.1, 1000.0);
     let view = look_at_matrix(
-        [0.0, 10.0, 20.0], // eye
+        [0.0, 20.0, 50.0], // eye - moved back and up
         [0.0, 5.0, 0.0],   // center
         [0.0, 1.0, 0.0],   // up
     );
+    // Note: In graphics, we apply view first, then projection
+    // So the multiplication order is projection × view
     matrix_multiply(&proj, &view)
 }
 
 fn perspective_matrix(fov: f32, aspect: f32, near: f32, far: f32) -> [[f32; 4]; 4] {
     let f = 1.0 / (fov / 2.0).tan();
+    // Standard perspective matrix for Vulkan/WebGPU (z: 0 to 1)
     [
         [f / aspect, 0.0, 0.0, 0.0],
         [0.0, f, 0.0, 0.0],
-        [0.0, 0.0, (far + near) / (near - far), -1.0],
-        [0.0, 0.0, (2.0 * far * near) / (near - far), 0.0],
+        [0.0, 0.0, far / (far - near), 1.0],
+        [0.0, 0.0, -(far * near) / (far - near), 0.0],
     ]
 }
 
@@ -372,6 +394,7 @@ fn look_at_matrix(eye: [f32; 3], center: [f32; 3], up: [f32; 3]) -> [[f32; 4]; 4
     let s = normalize(cross(f, up));
     let u = cross(s, f);
     
+    // Standard look-at matrix
     [
         [s[0], u[0], -f[0], 0.0],
         [s[1], u[1], -f[1], 0.0],
@@ -398,6 +421,7 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
 }
 
 fn matrix_multiply(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    // Standard row-major matrix multiplication
     let mut result = [[0.0; 4]; 4];
     for i in 0..4 {
         for j in 0..4 {
@@ -407,4 +431,13 @@ fn matrix_multiply(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
         }
     }
     result
+}
+
+fn transpose_matrix(m: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    [
+        [m[0][0], m[1][0], m[2][0], m[3][0]],
+        [m[0][1], m[1][1], m[2][1], m[3][1]],
+        [m[0][2], m[1][2], m[2][2], m[3][2]],
+        [m[0][3], m[1][3], m[2][3], m[3][3]],
+    ]
 }
