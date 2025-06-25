@@ -1,0 +1,24 @@
+[package]
+name = "physics_core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wgpu = "23.0"
+pollster = "0.4"
+env_logger = "0.11"
+bytemuck = { version = "1.19", features = ["derive"] }
+winit = { version = "0.30", optional = true }
+futures = "0.3"
+glam = { version = "0.29", optional = true }
+
+[features]
+default = []
+viz = ["dep:winit", "dep:glam"]
+
+[[bench]]
+name = "thruput"
+harness = false
+
+[dev-dependencies]
+criterion = "0.5"

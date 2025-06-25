@@ -1,0 +1,74 @@
+#!/bin/bash
+# Unified CLI for Physics Core engine
+
+case "$1" in
+    benchmark)
+        shift
+        cargo run --release --bin benchmark -- "$@"
+        ;;
+    demo)
+        case "$2" in
+            simple)
+                cargo run --bin demo_simple
+                ;;
+            ascii)
+                cargo run --bin demo_ascii
+                ;;
+            viz)
+                cargo run --features viz --bin demo_viz
+                ;;
+            *)
+                echo "Usage: physics_core demo <simple|ascii|viz>"
+                exit 1
+                ;;
+        esac
+        ;;
+    test)
+        case "$2" in
+            sdf)
+                cargo run --bin test_sdf
+                ;;
+            contact)
+                cargo run --bin test_contact_solver
+                ;;
+            broadphase)
+                cargo run --bin test_broadphase_grid
+                ;;
+            runner)
+                cargo run --bin test_runner
+                ;;
+            *)
+                echo "Usage: physics_core test <sdf|contact|broadphase|runner>"
+                exit 1
+                ;;
+        esac
+        ;;
+    help|--help|-h|"")
+        echo "Physics Core - WebGPU-accelerated rigid body physics engine"
+        echo ""
+        echo "Usage: physics_core <command> [options]"
+        echo ""
+        echo "Commands:"
+        echo "  benchmark [bodies]     Run performance benchmarks"
+        echo "  demo <type>           Run demos:"
+        echo "    simple              Console output demo"
+        echo "    ascii               ASCII visualization"
+        echo "    viz                 Wireframe visualization"
+        echo "  test <component>      Run component tests:"
+        echo "    sdf                 Test collision detection"
+        echo "    contact             Test contact solver"
+        echo "    broadphase          Test broad phase"
+        echo "    runner              Generic test runner"
+        echo "  help                  Show this help message"
+        echo ""
+        echo "Examples:"
+        echo "  physics_core benchmark 10000"
+        echo "  physics_core demo ascii"
+        echo "  physics_core test sdf"
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Run 'physics_core help' for usage"
+        exit 1
+        ;;
+esac
