@@ -1,212 +1,106 @@
-# Development History & Implementation Notes
+# AGENTS.md - Development History & Strategic Context
 
-This document contains the development history and implementation details for the physics engine project.
+This document contains the development history and, more importantly, the strategic and technical context for AI development assistants. It is the single source of truth for the project's goals, constraints, and multi-phase roadmap.
 
-## 📖 Development Timeline
+## 1. Core Mission & Philosophy
 
-### Phase 1 Implementation Journey
+**Mission:** Build a WebGPU-first, batch-differentiable rigid-body simulator that can run tens of thousands of bodies entirely on the GPU. The end goal is to plug this engine into `tinygrad` to create a platform for novel research in evolutionary robotics and physically-grounded AI.
 
-#### Step 0: Project Setup ✅
-- Created Rust project with wgpu dependencies
-- Set up WebGPU context initialization
-- Established GPU device and queue management
+**Philosophy & Ground Rules:**
+- **Tests First, Perf Second:** Behavior is locked with a NumPy oracle and an exhaustive `pytest`/`Hypothesis` test suite before any micro-optimization.
+- **Single Source of Truth:** One SoA buffer for all body states, padded to 16 bytes. The Rust `#[repr(C)]` struct must always exactly match the WGSL `struct Body`.
+- **No Hidden Host Hops:** Every feature must be proven to run entirely on the GPU until a queue submission. No implicit data transfers.
+- **Strict Cost Ceiling:** This project operates on a sabbatical budget. Development relies on local consumer GPUs. Cloud compute (e.g., A100 bursts) is reserved for final, high-impact paper-related sweeps and must be explicitly justified, staying under a total budget of $200/month.
 
-#### Step 1: Python Reference Implementation ✅
-- Implemented reference physics in NumPy
-- Created test data generation for validation
-- Established ground truth for GPU implementation
+## 2. The Multi-Phase Master Plan
 
-#### Step 2: Data Layout Design ✅
-- Designed 112-byte Array of Structures (AoS) layout
-- Optimized for GPU memory alignment (16-byte boundaries)
-- Balanced between memory bandwidth and cache efficiency
+This roadmap outlines the concrete, time-boxed deliverables from the initial engine to a shippable, research-grade showcase.
 
-#### Step 3.1: Integrator Kernel ✅
-- Implemented semi-implicit Euler integration in WGSL
-- Added gravity and velocity update
-- Validated against Python reference
+### Phase 1: Stand-alone Engine (COMPLETE)
+*   **Goal:** A high-performance, stand-alone Rust + WGSL demo. `tinygrad` is not touched.
+*   **Success Criteria:** All tests pass, performance exceeds 10,000 body-steps/s, and WGSL kernels are stable and portable.
+*   **Key Deliverables:** `physics_core` binary, comprehensive test suite, wireframe visualization, and validated performance benchmarks.
 
-#### Step 3.2: SDF Collision Detection ✅
-- Implemented sphere, box, and capsule SDFs
-- Added normal computation for contact resolution
-- Achieved sub-millimeter accuracy
+---
 
-#### Step 3.3: Contact Solver ✅
-- Penalty-based spring-damper model
-- Proper force application (Newton's third law)
-- Energy dissipation through damping
+### Phase 2: "Hello tinygrad" Smoke Test (Next Week)
+1.  **Expose WGSL in tinygrad:** Patch the `tinygrad` WebGPU runtime to accept a `"WGSL_RAW"` tuple (`src`, `name`, `wgsize`). This should be a minimal, non-invasive change (~70 LOC).
+2.  **Register Custom Ops:** Register `PHYSICS_STEP` and `CONTACT_SOLVE` as custom operations.
+3.  **Python Shim:** Create a `tinyphys.step(state_tensor, dt)` that dispatches the raw WGSL op and returns the updated state as a new tensor.
+4.  **Sanity RL Demo:** Implement a simple cart-pole-style balancing task. Use a built-in `tinygrad` optimizer (e.g., RMSProp) to learn a linear policy. The goal is to create a smoke test to prove gradients are flowing through the system.
+5.  **Milestone:** `v0.2.0` (“autograd path live”).
 
-#### Step 3.4: Broad Phase ✅
-- Uniform grid spatial partitioning
-- 89% collision pair pruning efficiency
-- Duplicate-free pair detection
+---
 
-### Critical Bug Fixes
+### Phase 3: Differentiable Evolution Loop (Next Month)
+1.  **Analytic Jacobians:** Implement the backward pass for the integrator and contact solver directly in WGSL. Expose this as an `adjoint_step` kernel.
+2.  **Gradient Validation:** Validate the analytic gradients against finite-difference approximations across at least 100 randomized scenes.
+3.  **DreamerV3 Integration:** Swap raw pixel observations for the latent state vector `z_t` from a pre-trained DreamerV3 world model. This treats the physics engine as a component within a larger learned model.
+4.  **Quality-Diversity (QD) Loop:**
+    *   **Outer Loop (CPU):** Mutate a morphology genotype → upload the new `Body` layout to the GPU.
+    *   **Inner Loop (GPU):** Run N simulation rollouts.
+    *   **Novelty Metric (GPU):** Compute novelty as `‖z_t – μ_seen‖₂` on-GPU.
+    *   **Archive (CPU):** Log `(reward, novelty)` pairs and maintain a Hall-of-Fame archive of morphologies based on non-domination.
+5.  **Milestone:** `v0.3.0` (“differentiable evolution loop”).
 
-#### 1. Uniform Buffer Alignment Issue
-**Problem**: WGSL requires 16-byte alignment for vec3 in uniforms
+---
+
+### Phase 4: Live Control & Telemetry (3 Months)
+1.  **Telemetry Streamer:** Implement a Rust WebSocket server to stream simulation telemetry (step, energy, contact counts) as JSON blobs.
+2.  **Minimal Web Dashboard:** Create a lightweight web interface (React or HTMX) to visualize the live telemetry.
+3.  **LLM Scaffolding:** Allow an LLM to subscribe to the telemetry stream and issue commands (`pause`, `mutate`, `resume`). If the LLM detects an invariant violation (e.g., energy explosion), it should be able to auto-generate a skeleton for a new unit test capturing the failure case.
+4.  **Milestone:** `v0.5.0` (“live control center”).
+
+---
+
+### Phase 5: Flagship Demo & Paper (6 Months)
+1.  **Public Showcase:** Create a livestream or interactive web demo of the "ideal body" evolution, showing novel morphologies emerging in real-time.
+2.  **Publishable Artifacts:** Prepare an 8-page arXiv draft detailing the methodology, performance, and emergent results.
+3.  **One-Click Deploy:** Package the demo in a Docker image with a minimal WebUI for public release.
+4.  **Handoff & Future Work:** Tag `v0.9.0`. Roadmap soft-body physics, differentiable fluids, and on-GPU rendering.
+
+## 3. Phase 1 Specification (For Posterity)
+
+*This was the original specification used to guide Phase 1 development.*
+
+- **Mission:** Build a stand-alone Rust + WGSL demo.
+- **Success Criteria:**
+    1. All automated tests pass on CI.
+    2. `cargo run --release --bin benchmark` reports ≥ 10,000 bodies × steps / s.
+    3. WGSL kernels in `src/shaders/*.wgsl` expose a stable `physics_step` signature.
+    4. Moving WGSL strings to tinygrad custom ops is expected to need < 1 day of glue work.
+- **Implementation Plan:**
+    - Step 0: Project scaffolding.
+    - Step 1: CPU golden reference in Python.
+    - Step 2: Data layout lock-in.
+    - Step 3: Kernel TDD loop (Integrator, Narrow, Contact, Broad).
+    - Step 4: Benchmarking and optimization.
+    - Step 5: Minimal wire-frame debug view.
+- **Test Suite:**
+    - Unit maths, golden single step, golden 1,000-step free-fall, property fuzzing, stability stress test, performance guardrail.
+
+## 4. Current Status & Technical Details (Phase 1 Complete)
+
+### Performance Achieved
+- **~630M body×steps/s** with 20,000 bodies.
+- Memory: 112 bytes per body (GPU-optimized alignment).
+
+### Body Structure (112 bytes, 16-byte aligned)
 ```rust
-// Before (broken)
-struct SimParams {
-    dt: f32,
-    gravity: [f32; 3],  // Misaligned!
-}
-
-// After (fixed)
-struct SimParams {
-    dt: f32,
-    gravity_x: f32,
-    gravity_y: f32,
-    gravity_z: f32,
-    num_bodies: u32,
-    _padding: [f32; 3],
+struct Body {
+    position: [f32; 4],      // xyz + padding
+    velocity: [f32; 4],      // xyz + padding
+    orientation: [f32; 4],   // quaternion
+    angular_vel: [f32; 4],   // xyz + padding
+    mass_data: [f32; 4],     // mass, inv_mass, padding
+    shape_data: [u32; 4],    // type, flags (static=1), padding
+    shape_params: [f32; 4],  // radius/half_extents
 }
 ```
 
-#### 2. Shader Dispatch Bug
-**Problem**: Only first 2-3 bodies were animating
-```wgsl
-// Before (hardcoded limit)
-if (idx >= 2u) { return; }
-
-// After (dynamic)
-if (idx >= arrayLength(&bodies)) { return; }
-```
-
-#### 3. Array Stride Error
-**Problem**: `array<f32, 3>` in struct caused alignment issues
-```rust
-// Solution: Use explicit padding fields
-_padding0: f32,
-_padding1: f32,
-_padding2: f32,
-```
-
-## 🔧 Technical Implementation Details
-
-### GPU Memory Access Patterns
-- Coalesced reads: Bodies accessed sequentially by thread ID
-- Workgroup size 64: Optimal for warp/wavefront execution
-- Memory bandwidth limited, not compute limited
-
-### Shader Architecture
-```
-┌─────────────────┐
-│ physics_step    │ ← Main orchestrator
-└────────┬────────┘
-         │
-    ┌────┴────┬──────────┬─────────┐
-    ▼         ▼          ▼         ▼
-┌────────┐ ┌─────┐ ┌──────────┐ ┌───────────┐
-│integrator│ │ sdf │ │ contact  │ │ broadphase│
-└─────────┘ └─────┘ └──────────┘ └───────────┘
-```
-
-### Performance Optimization Techniques
-
-1. **Memory Layout**
-   - AoS for better cache locality per body
-   - 16-byte alignment for efficient GPU access
-   - Padding to avoid bank conflicts
-
-2. **Compute Dispatch**
-   - One thread per body
-   - Minimal divergence in shader code
-   - Early exit for static bodies
-
-3. **Broad Phase Efficiency**
-   - Cell size = 2.5x max object radius
-   - Morton encoding considered but not needed
-   - Grid cleared each frame (simpler than updates)
-
-### Testing Philosophy
-
-1. **Python Reference First**
-   - Every GPU component has Python equivalent
-   - Golden data generation for validation
-   - Numerical accuracy verification
-
-2. **Property-Based Testing**
-   - Hypothesis framework for SDF properties
-   - Energy conservation over 1000+ steps
-   - Stability under extreme conditions
-
-3. **Stress Testing**
-   - 5000 bodies for 30 seconds
-   - Extreme velocities and dense packing
-   - Memory stability verification
-
-## 📊 Performance Analysis
-
-### Bottleneck Identification
-- **Primary**: Memory bandwidth (112 bytes × bodies × 60 FPS)
-- **Secondary**: Atomic operations in broad phase
-- **Not limiting**: Compute (simple math operations)
-
-### Scaling Characteristics
-```
-Bodies  | Time/Step | Efficiency
---------|-----------|------------
-100     | 0.04ms    | Low (overhead dominated)
-1,000   | 0.03ms    | Good
-10,000  | 0.04ms    | Excellent
-100,000 | 0.16ms    | Memory bound
-```
-
-## 🐛 Debugging Tips
-
-### Common Issues
-1. **Black screen**: Check uniform buffer alignment
-2. **No movement**: Verify arrayLength() in shaders
-3. **Crashes**: Look for out-of-bounds grid access
-4. **Wrong physics**: Compare with Python reference
-
-### Useful Debug Commands
-```bash
-# Shader compilation errors
-RUST_LOG=wgpu=debug cargo run
-
-# Memory validation
-cargo test body_size
-
-# Python validation
-python3 tests/test_integrator.py
-```
-
-## 🚀 Future Optimization Ideas
-
-1. **Memory Layout**
-   - Try Structure of Arrays (SoA) for bandwidth
-   - Compress quaternions to 3 components
-   - Pack shape data more efficiently
-
-2. **Algorithmic**
-   - Hierarchical grid for varied object sizes
-   - Sweep and prune for 1D broad phase
-   - Sleeping/islands for static groups
-
-3. **GPU Features**
-   - Mesh shaders for contact generation
-   - Ray tracing for continuous collision
-   - Tensor cores for batched math
-
-## 📝 Lessons Learned
-
-1. **WGSL Alignment is Strict**: Always check uniform buffer layouts
-2. **Test Early and Often**: Python reference saved debugging time
-3. **Profile Don't Guess**: Memory bandwidth was the real limit
-4. **Simple Can Be Fast**: Uniform grid outperformed complex alternatives
-
-## 🎯 Phase 2 Preparation Notes
-
-### Tinygrad Integration Considerations
-- Need to expose body state as tensors
-- Gradient flow through contact forces
-- Differentiable collision detection challenges
-
-### Python Interop Design
-- Zero-copy GPU buffer sharing
-- PyTorch/JAX custom ops
-- Async execution model
-
-This development was completed over several intense sessions, with the critical bug fixes being the turning point that unlocked full performance. The final system exceeds requirements by 46,900x!
+### Recently Fixed Issues
+- ✅ `SimParams` uniform buffer fixed (proper WGSL alignment).
+- ✅ All bodies now animate correctly (removed hardcoded shader limits).
+- ✅ Wireframe visualization implemented.
+- ✅ Comprehensive test suite implemented and passing.
+- ✅ Unified CLI implemented.

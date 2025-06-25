@@ -60,12 +60,39 @@ cd physicsengine/physics_core
 
 ## Roadmap
 
-This project is planned in several phases, moving from a stand-alone engine to a fully differentiable system integrated with machine learning frameworks.
+This project follows an ambitious, phased plan to evolve from a physics engine into a platform for cutting-edge AI research.
 
--   **Phase 1 (Complete):** Build and validate the stand-alone Rust + WGSL engine.
--   **Phase 2 (Next):** Integrate with `tinygrad` by exposing WGSL kernels as custom operations, enabling a full autograd pipeline.
--   **Phase 3:** Implement analytic Jacobians for a differentiable backward pass and connect to world models like DreamerV3 for novel research applications.
--   **Future Work:** Explore telemetry dashboards, LLM-driven simulation control, soft-body physics, and differentiable fluids.
+-   **Phase 1: Stand-Alone Engine (Complete)**
+    -   **Status:** A high-performance, stand-alone Rust + WGSL simulator.
+    -   **Outcome:** Validated with an exhaustive test suite and benchmarked at over 600M body-steps/s.
+
+-   **Phase 2: Tinygrad Integration & Autograd (Next)**
+    -   **Goal:** Achieve a full, end-to-end differentiable pipeline.
+    -   **Key Steps:**
+        -   Expose raw WGSL kernels as custom operations within `tinygrad`.
+        -   Implement a Python shim for dispatching physics steps as tensor operations.
+        -   Validate the gradient flow with a simple reinforcement learning task.
+
+-   **Phase 3: Differentiable Evolution & World Models**
+    -   **Goal:** Enable novel morphology and policy co-evolution.
+    -   **Key Steps:**
+        -   Implement an analytic backward pass (Jacobians) in WGSL for high-performance gradient calculation.
+        -   Integrate with pre-trained world models (e.g., DreamerV3) by using latent vectors (`z_t`) as the observation space.
+        -   Build a Quality-Diversity (QD) outer loop to search for novel morphologies driven by task reward and latent-space novelty.
+
+-   **Phase 4: Live Telemetry & Interactive Control**
+    -   **Goal:** Create a "live control center" for monitoring and interacting with simulations.
+    -   **Key Steps:**
+        -   Develop a WebSocket server to stream real-time telemetry from the simulation.
+        -   Build a minimal web-based dashboard for live visualization.
+        -   Prototype interactive control, allowing external agents (including LLMs) to pause, mutate, and resume simulations.
+
+-   **Phase 5: Flagship Showcase & Publication**
+    -   **Goal:** Deliver a shippable, public demonstration and publish the results.
+    -   **Key Steps:**
+        -   Create a flagship demo showcasing emergent "ideal body" evolution.
+        -   Package the project for one-click deployment (e.g., Docker).
+        -   Publish an arXiv paper detailing the methods, performance, and findings.
 
 ## Development
 
