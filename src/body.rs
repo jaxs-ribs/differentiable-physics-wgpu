@@ -38,6 +38,18 @@ impl Body {
         }
     }
     
+    pub fn new_box(position: [f32; 3], half_extents: [f32; 3], mass: f32) -> Self {
+        Self {
+            position: [position[0], position[1], position[2], 0.0],
+            velocity: [0.0; 4],
+            orientation: [1.0, 0.0, 0.0, 0.0],
+            angular_vel: [0.0; 4],
+            mass_data: [mass, if mass > 0.0 { 1.0 / mass } else { 0.0 }, 0.0, 0.0],
+            shape_data: [2, 0, 0, 0], // shape_type=2 (box), flags=0 (dynamic)
+            shape_params: [half_extents[0], half_extents[1], half_extents[2], 0.0],
+        }
+    }
+    
     pub fn new_static_box(position: [f32; 3], half_extents: [f32; 3]) -> Self {
         Self {
             position: [position[0], position[1], position[2], 0.0],

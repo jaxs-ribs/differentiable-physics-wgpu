@@ -205,8 +205,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     pub fn update_bodies(&self, gpu: &GpuContext, bodies: &[Body]) {
         let mut vertices = Vec::new();
         
-        println!("Updating {} bodies for visualization", bodies.len());
-        
         for (i, body) in bodies.iter().enumerate() {
             // Get AABB from body
             let pos = [body.position[0], body.position[1], body.position[2]];

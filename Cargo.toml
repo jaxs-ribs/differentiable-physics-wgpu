@@ -22,3 +22,19 @@ harness = false
 
 [dev-dependencies]
 criterion = "0.5"
+
+[[bin]]
+name = "test_viz_triangle"
+required-features = ["viz"]
+
+[[bin]]
+name = "test_viz_debug_vertices"
+required-features = ["viz"]
+
+[[bin]]
+name = "test_viz_pipeline"
+required-features = ["viz"]
+
+[[bin]]
+name = "test_matrix_debug"
+required-features = ["viz"]

@@ -1,5 +1,7 @@
 # AGENTS.md - Development History & Strategic Context
 
+**SUMMARY:** Physics engine works (630M body-steps/s achieved!) but wireframe viz only shows background. Fixed matrix math, consolidated scripts to 3. ENTRYPOINT: Debug why wireframes aren't rendering despite correct vertex generation.
+
 This document contains the development history and, more importantly, the strategic and technical context for AI development assistants. It is the single source of truth for the project's goals, constraints, and multi-phase roadmap.
 
 ## 1. Core Mission & Philosophy
@@ -129,3 +131,24 @@ struct Body {
 - ✅ Wireframe visualization implemented.
 - ✅ Comprehensive test suite implemented and passing.
 - ✅ Unified CLI implemented.
+- ✅ Matrix transformations fixed (row-major to column-major for GPU).
+- ✅ Shell scripts consolidated to 3 simple scripts (pc-test, pc-bench, pc-demo).
+
+### Current Issue - Wireframe Not Visible
+**ENTRYPOINT:** The wireframe visualization shows only background color despite physics working correctly.
+
+**Status:** Physics simulation runs (bodies fall), 288 vertices generated for 12 bodies, but wireframes not rendering.
+
+**Debug Info:**
+- Vertex data is being generated (24 vertices per AABB)
+- Matrix math fixed with transpose for GPU column-major format
+- Camera at (0, 20, 50) looking at (0, 5, 0)
+- Pipeline configured for LineList topology
+- Colors set (green=dynamic, gray=static)
+
+**Next Steps:**
+1. Verify vertex positions are in reasonable world space coordinates
+2. Check if view-projection matrix correctly transforms to NDC [-1,1]
+3. Test with simpler scene (single box at origin)
+4. Add depth buffer to pipeline (currently None)
+5. Check if lines are being culled or clipped
