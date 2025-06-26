@@ -58,10 +58,7 @@ cargo run --release --bin benchmark_full           # Full benchmark suite
 ./pc-demo ascii                                    # ASCII visualization
 
 # Debug tools
-cargo run --features viz --bin debug_viz -- \      # Visual diff debugger
-  --oracle tests/failures/test_name/cpu_state.npy \
-  --gpu tests/failures/test_name/gpu_state.npy
-
+cargo run --features viz --bin debug_viz           # Visual state inspector/differ
 python3 tests/plot_energy.py                       # Plot energy conservation
 ```
 
@@ -118,25 +115,37 @@ tests/failures/<test_name>/
 pytest tests/test_gpu_cpu_parity.py --keep-failures
 ```
 
-### Visual Diff Debugger
+### Visual State Inspector and Debugger
 
-Visualize divergence between CPU and GPU simulations:
+The `debug_viz` tool provides flexible state visualization with three distinct modes:
 
 ```bash
-# Launch the visual debugger
+# Mode 1: DEFAULT/DEMO MODE - Test the renderer with a hardcoded scene
+cargo run --features viz --bin debug_viz
+# Shows: 3 white spheres in a simple stack
+
+# Mode 2: INSPECT MODE - Visualize a single state file
+cargo run --features viz --bin debug_viz -- --oracle tests/oracle_dump.npy
+# OR
+cargo run --features viz --bin debug_viz -- --gpu tests/gpu_dump.npy
+# Shows: The loaded state in white
+
+# Mode 3: DIFF MODE - Compare two states side-by-side
 cargo run --features viz --bin debug_viz -- \
   --oracle tests/failures/test_name/cpu_state.npy \
   --gpu tests/failures/test_name/gpu_state.npy
+# Shows: Oracle in green/transparent, GPU in red/opaque
 
 # Controls:
 # - B: Toggle AABB visualization
 # - C: Toggle contact points
 # - ESC: Exit
-
-# Visual indicators:
-# - Green/transparent: Oracle (CPU) state
-# - Red/opaque: GPU state
 ```
+
+This tool is immediately useful for:
+- **Debugging oracle behavior**: Inspect Python physics states visually
+- **Finding divergences**: Compare CPU vs GPU states when tests fail
+- **Testing renderer**: Verify visualization works without any dependencies
 
 ### Energy Conservation Analysis
 

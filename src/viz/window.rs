@@ -1,4 +1,4 @@
-use winit::{event_loop::EventLoop, window::Window};
+use winit::{event_loop::EventLoop, window::{Window, WindowAttributes}};
 
 const DEFAULT_WINDOW_WIDTH: u32 = 1024;
 const DEFAULT_WINDOW_HEIGHT: u32 = 768;
@@ -10,7 +10,7 @@ pub struct WindowManager {
 
 impl WindowManager {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self, Box<dyn std::error::Error>> {
-        let window_attributes = Window::default_attributes()
+        let window_attributes = WindowAttributes::default()
             .with_title(WINDOW_TITLE)
             .with_inner_size(winit::dpi::LogicalSize::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT));
         

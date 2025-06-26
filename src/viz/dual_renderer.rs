@@ -10,9 +10,9 @@ use super::{
 const MAX_AABB_COUNT: usize = 1000;
 const VERTEX_BUFFER_SIZE: u64 = 12 * 2 * 6 * 4 * MAX_AABB_COUNT as u64;
 const CLEAR_COLOR: wgpu::Color = wgpu::Color {
-    r: 0.1,
-    g: 0.1,
-    b: 0.1,
+    r: 0.15,
+    g: 0.15,
+    b: 0.15,
     a: 1.0,
 };
 
@@ -117,14 +117,36 @@ impl DualRenderer {
         })
     }
     
-    pub fn update_scenes(&mut self, gpu: &GpuContext, oracle_bodies: Option<&[Body]>, gpu_bodies: Option<&[Body]>) {
+    pub fn update_scenes(&mut self, gpu_context: &GpuContext, oracle_bodies: Option<&[Body]>, gpu_bodies: Option<&[Body]>) {
+        // Determine colors based on mode
+        let (oracle_color, gpu_color) = match (oracle_bodies.is_some(), gpu_bodies.is_some()) {
+            (true, true) => {
+                // Diff mode: green/transparent vs red/opaque
+                (ColorUniform { color: [0.0, 1.0, 0.0, 0.5] }, ColorUniform { color: [1.0, 0.0, 0.0, 1.0] })
+            }
+            (true, false) | (false, true) => {
+                // Inspect mode: black/opaque for whichever is present
+                (ColorUniform { color: [0.0, 0.0, 0.0, 1.0] }, ColorUniform { color: [0.0, 0.0, 0.0, 1.0] })
+            }
+            (false, false) => {
+                // Default/Demo Mode: white
+                (ColorUniform { color: [1.0, 1.0, 1.0, 1.0] }, ColorUniform { color: [1.0, 1.0, 1.0, 1.0] })
+            }
+        };
+        
+        // Update colors
+        gpu_context.queue.write_buffer(&self.oracle_color_buffer, 0, bytemuck::cast_slice(&[oracle_color]));
+        gpu_context.queue.write_buffer(&self.gpu_color_buffer, 0, bytemuck::cast_slice(&[gpu_color]));
+        
         // Update oracle scene
         if let Some(bodies) = oracle_bodies {
             let vertices = WireframeGeometry::generate_vertices_from_bodies(bodies);
             self.oracle_vertex_count = vertices.len() as u32;
             if !vertices.is_empty() {
-                gpu.queue.write_buffer(&self.oracle_line_buffer, 0, bytemuck::cast_slice(&vertices));
+                gpu_context.queue.write_buffer(&self.oracle_line_buffer, 0, bytemuck::cast_slice(&vertices));
             }
+        } else {
+            self.oracle_vertex_count = 0;
         }
         
         // Update GPU scene
@@ -132,8 +154,10 @@ impl DualRenderer {
             let vertices = WireframeGeometry::generate_vertices_from_bodies(bodies);
             self.gpu_vertex_count = vertices.len() as u32;
             if !vertices.is_empty() {
-                gpu.queue.write_buffer(&self.gpu_line_buffer, 0, bytemuck::cast_slice(&vertices));
+                gpu_context.queue.write_buffer(&self.gpu_line_buffer, 0, bytemuck::cast_slice(&vertices));
             }
+        } else {
+            self.gpu_vertex_count = 0;
         }
     }
     
@@ -141,6 +165,9 @@ impl DualRenderer {
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         
+        // Update the camera uniform buffer on every frame
+        self.update_uniform_buffer(gpu);
+
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Dual Render Encoder"),
         });
@@ -170,6 +197,10 @@ impl DualRenderer {
     
     pub fn set_debug_contacts(&mut self, enabled: bool) {
         self.show_contacts = enabled;
+    }
+    
+    pub fn camera_mut(&mut self) -> &mut Camera {
+        &mut self.camera
     }
     
     fn create_surface(window_manager: &WindowManager, gpu: &GpuContext) -> Result<wgpu::Surface<'static>, Box<dyn std::error::Error>> {

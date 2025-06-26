@@ -246,15 +246,30 @@ python3 test_energy.py          # Energy conservation tests
      - `debug_info.txt`: Test details and traceback
    - Use `--keep-failures` flag to preserve old failure dumps
 
-2. **Visual Diff Debugger** (`cargo run --features viz --bin debug_viz`)
-   - Loads and renders both CPU and GPU states simultaneously
+2. **Flexible Visual State Inspector** (`cargo run --features viz --bin debug_viz`)
+   - **Three operating modes based on command-line arguments:**
+     
+   **Mode 1: DEFAULT/DEMO MODE** (no arguments)
+   - Command: `cargo run --features viz --bin debug_viz`
+   - Displays a hardcoded demo scene (3 spheres) in white
+   - Useful for testing the renderer without any dependencies
+   
+   **Mode 2: INSPECT MODE** (single file)
+   - Command: `cargo run --features viz --bin debug_viz -- --oracle state.npy`
+   - OR: `cargo run --features viz --bin debug_viz -- --gpu state.npy`
+   - Loads and displays a single state file in white
+   - Perfect for visualizing Python oracle behavior
+   
+   **Mode 3: DIFF MODE** (both files)
+   - Command: `cargo run --features viz --bin debug_viz -- --oracle cpu_state.npy --gpu gpu_state.npy`
    - Oracle (CPU) state rendered in green/transparent
    - GPU state rendered in red/opaque
-   - Interactive controls:
+   - Shows divergences between implementations
+   
+   - **Interactive controls (all modes):**
      - 'B' key: Toggle AABB visualization
      - 'C' key: Toggle contact point visualization
      - ESC: Exit
-   - Usage: `cargo run --features viz --bin debug_viz -- --oracle cpu_state.npy --gpu gpu_state.npy`
 
 3. **Energy Conservation Plotter** (`tests/plot_energy.py`)
    - Tracks total system energy over time

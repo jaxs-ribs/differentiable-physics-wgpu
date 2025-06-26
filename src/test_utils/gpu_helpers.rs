@@ -72,7 +72,7 @@ impl GpuBufferHelpers {
             tx.send(result).unwrap();
         });
         
-        device.poll(wgpu::Maintain::Wait);
+        device.poll(wgpu::MaintainBase::Wait);
         rx.await.unwrap().unwrap();
         
         let data = buffer_slice.get_mapped_range();

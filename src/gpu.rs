@@ -1,15 +1,16 @@
-use wgpu::{Device, Queue, Buffer, BufferUsages, util::DeviceExt, Instance, Adapter};
+use wgpu::{Buffer, BufferUsages, util::DeviceExt};
+use anyhow::Result;
 
 pub struct GpuContext {
-    pub instance: Instance,
-    pub adapter: Adapter,
-    pub device: Device,
-    pub queue: Queue,
+    pub instance: wgpu::Instance,
+    pub adapter: wgpu::Adapter,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
 }
 
 impl GpuContext {
-    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+    pub async fn new() -> Result<Self> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -17,22 +18,26 @@ impl GpuContext {
                 compatible_surface: None,
                 force_fallback_adapter: false,
             })
-            .await
-            .ok_or("Failed to find adapter")?;
+            .await?;
 
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    label: Some("Physics Device"),
-                    required_features: wgpu::Features::empty(),
+                    label: Some("Primary Device"),
+                    required_features: wgpu::Features::default(),
                     required_limits: wgpu::Limits::default(),
-                    memory_hints: wgpu::MemoryHints::Performance,
+                    memory_hints: wgpu::MemoryHints::default(),
+                    trace: Default::default(),
                 },
-                None,
             )
             .await?;
 
-        Ok(Self { instance, adapter, device, queue })
+        Ok(Self {
+            instance,
+            adapter,
+            device,
+            queue,
+        })
     }
     
     pub fn create_buffer_init(&self, label: &str, data: &[u8], usage: BufferUsages) -> Buffer {

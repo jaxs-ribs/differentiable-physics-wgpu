@@ -89,7 +89,7 @@ impl BufferManager {
             tx.send(result).unwrap();
         });
         
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::MaintainBase::Wait);
         rx.await.unwrap().unwrap();
         
         let data = buffer_slice.get_mapped_range();

@@ -52,6 +52,6 @@ impl ComputeExecutor {
     
     fn submit_and_wait(&self, gpu: &GpuContext, encoder: wgpu::CommandEncoder) {
         gpu.queue.submit(Some(encoder.finish()));
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::MaintainBase::Wait);
     }
 }
