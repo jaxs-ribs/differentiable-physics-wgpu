@@ -1,5 +1,6 @@
 mod camera;
 mod renderer;
+mod dual_renderer;
 mod window;
 mod wireframe_geometry;
 mod shader_manager;
@@ -7,6 +8,7 @@ mod uniforms;
 
 pub use self::window::WindowManager;
 pub use self::renderer::Renderer;
+pub use self::dual_renderer::DualRenderer;
 
 use crate::{body::Body, gpu::GpuContext};
 use winit::event_loop::EventLoop;

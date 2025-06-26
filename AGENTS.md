@@ -233,3 +233,52 @@ python3 test_energy.py          # Energy conservation tests
 - Some broadphase edge cases may cause infinite loops
 - Full test suites (test_broadphase_sap.py, test_dynamics.py) may hang
 - Use test_implementations.py for quick validation
+
+### Latest Updates - Smart Test Failures and Debug Visualization
+
+**Three Major Debugging Tools Implemented:**
+
+1. **Smart Test Failure System** (`tests/conftest.py`)
+   - Automatically saves CPU and GPU states when parity tests fail
+   - Creates `tests/failures/<test_name>/` directory with:
+     - `cpu_state.npy`: CPU physics state at failure
+     - `gpu_state.npy`: GPU physics state at failure
+     - `debug_info.txt`: Test details and traceback
+   - Use `--keep-failures` flag to preserve old failure dumps
+
+2. **Visual Diff Debugger** (`cargo run --features viz --bin debug_viz`)
+   - Loads and renders both CPU and GPU states simultaneously
+   - Oracle (CPU) state rendered in green/transparent
+   - GPU state rendered in red/opaque
+   - Interactive controls:
+     - 'B' key: Toggle AABB visualization
+     - 'C' key: Toggle contact point visualization
+     - ESC: Exit
+   - Usage: `cargo run --features viz --bin debug_viz -- --oracle cpu_state.npy --gpu gpu_state.npy`
+
+3. **Energy Conservation Plotter** (`tests/plot_energy.py`)
+   - Tracks total system energy over time
+   - Calculates kinetic (linear + rotational) and potential energy
+   - Produces `energy_drift.png` showing energy conservation
+   - Usage: `python3 tests/plot_energy.py --scene tests/scenes/stack.json --steps 1000`
+
+**Testing the New Debug Tools:**
+
+```bash
+# 1. Run tests - failures will auto-dump states
+cd physics_core
+pytest tests/test_gpu_cpu_parity.py
+
+# 2. If a test fails, visualize the divergence
+cargo run --features viz --bin debug_viz -- \
+  --oracle tests/failures/test_name/cpu_state.npy \
+  --gpu tests/failures/test_name/gpu_state.npy
+
+# 3. Plot energy conservation
+cd tests
+python3 plot_energy.py --scene scenes/stack.json --steps 1000
+# Output: energy_drift.png
+
+# 4. Run all physics tests
+./run_all_tests.sh
+```
