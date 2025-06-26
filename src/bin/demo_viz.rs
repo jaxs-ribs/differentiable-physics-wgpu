@@ -1,3 +1,12 @@
+/*
+3D Wireframe Physics Visualization Demo
+
+This demo provides real-time 3D wireframe visualization of physics simulation using GPU-accelerated
+rendering. It showcases the complete integration between physics computation and visualization
+systems, allowing users to observe complex multi-body dynamics in an interactive 3D environment.
+Essential for debugging collision detection, validating physics behavior, and demonstrating engine capabilities.
+*/
+
 #[cfg(not(feature = "viz"))]
 compile_error!("This demo requires the 'viz' feature. Run with: cargo run --features viz --bin demo_viz");
 

@@ -1,3 +1,12 @@
+/*
+Matrix Math Library Validation Test
+
+This test validates the correctness of matrix operations used in physics calculations, particularly
+focusing on column-major vs row-major matrix layouts and multiplication operations. Matrix math
+errors lead to incorrect transformations, physics artifacts, and visual glitches. Essential for
+ensuring mathematical correctness in physics calculations and rendering pipelines.
+*/
+
 use physics_core::test_utils::math::{MatrixOperations, print_matrix};
 
 fn main() {

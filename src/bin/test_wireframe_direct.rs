@@ -1,3 +1,10 @@
+/*
+ * Direct wireframe rendering test - validates low-level line drawing and wireframe visualization.
+ * Tests direct GPU line rendering without higher-level abstractions, ensuring wireframe physics
+ * body outlines render correctly. Critical for physics debugging as wireframe views reveal shape
+ * boundaries, collision detection accuracy, and body deformation issues that solid rendering might hide.
+ */
+
 #[cfg(not(feature = "viz"))]
 compile_error!("This demo requires the 'viz' feature");
 

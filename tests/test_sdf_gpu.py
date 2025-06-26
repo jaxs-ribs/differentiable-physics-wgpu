@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+GPU SDF Implementation Validation Test
+
+This test ensures that GPU-compiled WGSL SDF shaders produce identical distance calculations to CPU
+reference implementations. GPU shader compilation can introduce subtle precision differences or
+optimization artifacts that break collision detection. By cross-validating GPU output against known
+correct values, we maintain collision accuracy and catch shader compilation issues early.
+"""
 import numpy as np
 import subprocess
 import json

@@ -1,3 +1,12 @@
+/*
+GPU Broadphase Collision Culling Test
+
+This test verifies that the GPU uniform grid broadphase correctly partitions space and identifies
+potential collision pairs while filtering distant objects. It validates spatial hash algorithms,
+grid cell assignment, and pair generation efficiency on GPU hardware. Critical for ensuring
+O(n log n) collision detection performance and preventing missed collision pairs.
+*/
+
 use physics_core::{body::Body, gpu::GpuContext};
 use pollster::block_on;
 use bytemuck::{Pod, Zeroable};

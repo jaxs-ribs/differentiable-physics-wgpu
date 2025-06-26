@@ -1,3 +1,10 @@
+/*
+ * Basic triangle rendering test - validates fundamental GPU triangle rasterization and surface setup.
+ * Tests WGPU surface configuration, shader compilation, and primitive rendering in isolation. Critical
+ * for physics engine visualization as triangles form the basis of all 3D geometry rendering. Catches
+ * driver compatibility issues, surface creation problems, and basic rendering pipeline failures.
+ */
+
 #[cfg(not(feature = "viz"))]
 compile_error!("This test requires the 'viz' feature. Run with: cargo run --features viz --bin test_viz_triangle");
 

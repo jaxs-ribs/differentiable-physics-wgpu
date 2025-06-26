@@ -1,3 +1,10 @@
+/*
+ * Simple visualization matrix math test - validates basic 3D transformations and camera calculations
+ * without GPU rendering. Tests coordinate space conversions, perspective projections, and field-of-view
+ * calculations that are fundamental to physics engine visualization. Catches mathematical errors in
+ * view transformations before they manifest as visual bugs in the rendering pipeline.
+ */
+
 #[cfg(not(feature = "viz"))]
 compile_error!("This test requires the 'viz' feature");
 

@@ -1,3 +1,12 @@
+/*
+Physics Engine Performance Benchmark
+
+This benchmark measures the throughput and performance characteristics of the GPU physics pipeline
+under varying body counts. It provides quantitative metrics for optimization efforts and performance
+regression detection. Essential for validating that algorithmic improvements translate to real-world
+speedups and ensuring the engine meets performance requirements for production workloads.
+*/
+
 use physics_core::{body::Body, gpu::GpuContext};
 use pollster::block_on;
 use bytemuck::{Pod, Zeroable};

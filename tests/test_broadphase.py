@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+Broad Phase Collision Detection Test
+
+This test verifies the uniform spatial grid broad phase algorithm correctly identifies potential
+collision pairs while filtering out distant objects. Efficient broad phase is critical for performance
+- incorrect spatial partitioning can cause O(n²) scaling or missed collisions. By testing grid cell
+assignment and pair generation, we ensure optimal collision culling for large-scale simulations.
+"""
 import numpy as np
 import itertools
 

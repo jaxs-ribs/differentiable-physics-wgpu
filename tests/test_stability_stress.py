@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Stability stress test - 5000 bodies for 30 seconds of simulation time."""
+"""
+Large-Scale Stability Stress Test
+
+This test validates engine stability and performance under extreme conditions by simulating 5000+ bodies
+for extended periods. It detects memory leaks, numerical instabilities, and performance degradation that
+only emerge at scale. Large-scale testing ensures the engine can handle production workloads and catches
+issues like GPU memory exhaustion, precision loss, or algorithmic complexity problems.
+"""
 
 import numpy as np
 import subprocess

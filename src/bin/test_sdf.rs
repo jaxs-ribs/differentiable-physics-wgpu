@@ -1,3 +1,12 @@
+/*
+GPU SDF Collision Detection Integration Test
+
+This test validates that WGSL-compiled SDF shaders correctly detect collisions between geometric
+primitives on the GPU. It verifies distance calculations for overlapping and separated shapes,
+ensuring the GPU implementation matches mathematical expectations. Critical for catching shader
+compilation issues, GPU precision errors, and buffer alignment problems in collision detection.
+*/
+
 use physics_core::{body::Body, gpu::GpuContext};
 use pollster::block_on;
 use bytemuck::{Pod, Zeroable};

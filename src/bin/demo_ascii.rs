@@ -1,3 +1,12 @@
+/*
+ASCII Terminal Physics Visualization Demo
+
+This demo provides real-time ASCII visualization of physics simulation in the terminal, allowing
+users to observe body movements and collisions without requiring graphics hardware support. It
+demonstrates the engine's capabilities in resource-constrained environments and serves as an
+accessible way to visualize physics behavior for debugging and educational purposes.
+*/
+
 use physics_core::{body::Body, gpu::GpuContext};
 use pollster::block_on;
 use bytemuck::{Pod, Zeroable};

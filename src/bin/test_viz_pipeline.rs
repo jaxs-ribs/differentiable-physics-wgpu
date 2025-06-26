@@ -1,3 +1,10 @@
+/*
+ * Direct vertex pipeline test - validates the complete GPU rendering pipeline from vertex creation
+ * to screen output. Tests vertex buffer management, shader execution, and coordinate transformations
+ * in a controlled environment. Essential for physics engine visualization as it ensures geometric
+ * data flows correctly through the graphics pipeline, catching buffer issues and rendering bugs.
+ */
+
 #[cfg(not(feature = "viz"))]
 compile_error!("This test requires the 'viz' feature. Run with: cargo run --features viz --bin test_viz_pipeline");
 

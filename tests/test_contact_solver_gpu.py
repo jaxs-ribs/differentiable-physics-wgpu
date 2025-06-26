@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+GPU Contact Solver Integration Test
+
+This test validates that the GPU-accelerated contact solver produces consistent results across multiple
+simulation runs. By comparing GPU output with expected collision responses, we ensure the compute shaders
+correctly implement the penalty method and maintain numerical stability. This catches GPU-specific issues
+like precision errors or race conditions in parallel collision resolution.
+"""
 import numpy as np
 import subprocess
 

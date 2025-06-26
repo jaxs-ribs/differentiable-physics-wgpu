@@ -1,3 +1,12 @@
+/*
+GPU Broadphase Grid Implementation Test
+
+This test validates the GPU implementation of uniform spatial grid partitioning for broadphase
+collision detection. It verifies correct grid cell indexing, body-to-cell assignment, and spatial
+hash calculations on GPU hardware. Essential for ensuring efficient O(n) spatial partitioning
+performance and accurate collision pair generation in large-scale simulations.
+*/
+
 use physics_core::{body::Body, gpu::GpuContext};
 use pollster::block_on;
 use bytemuck::{Pod, Zeroable};

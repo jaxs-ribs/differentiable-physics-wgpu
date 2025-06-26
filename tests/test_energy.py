@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Test energy conservation over long simulations."""
+"""
+Energy Conservation Validation Test
+
+This test verifies that the physics engine conserves total energy (kinetic + potential) over extended
+simulations within acceptable numerical error bounds. Energy drift indicates integration instability,
+incorrect force calculations, or contact solver issues. By monitoring energy conservation over 1000+
+steps, we ensure the engine maintains physically plausible behavior and doesn't exhibit runaway dynamics.
+"""
 
 import numpy as np
 import subprocess

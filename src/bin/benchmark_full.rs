@@ -1,3 +1,12 @@
+/*
+Comprehensive Physics Engine Benchmark Suite
+
+This extended benchmark evaluates physics performance across multiple scenarios including different
+body counts, contact densities, and simulation configurations. It provides detailed performance
+profiling data for all pipeline stages and identifies bottlenecks. Critical for understanding
+scaling behavior and optimizing GPU kernel performance for various simulation scenarios.
+*/
+
 use physics_core::{body::Body, gpu::GpuContext};
 use pollster::block_on;
 use bytemuck::{Pod, Zeroable};

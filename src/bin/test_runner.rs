@@ -1,3 +1,12 @@
+/*
+Complete Physics Pipeline Integration Test
+
+This test validates the entire physics simulation pipeline by running a complete step including
+integration, broadphase, narrowphase collision detection, and contact resolution. It serves as
+an end-to-end validation that all GPU kernels work together correctly and produces JSON output
+for cross-validation with Python reference implementations.
+*/
+
 use physics_core::{body::Body, physics::PhysicsEngine};
 use pollster::block_on;
 use std::io::{self, Read};

@@ -1,3 +1,10 @@
+/*
+ * Debug vertex generation test - validates the conversion from physics bodies to renderable vertices.
+ * Tests geometry generation for spheres, boxes, and complex shapes used in physics simulations.
+ * Crucial for physics engine debugging as it ensures collision shapes are correctly visualized,
+ * enabling developers to identify physics bugs through visual inspection of body positions and shapes.
+ */
+
 #[cfg(not(feature = "viz"))]
 compile_error!("This test requires the 'viz' feature. Run with: cargo run --features viz --bin test_viz_debug_vertices");
 

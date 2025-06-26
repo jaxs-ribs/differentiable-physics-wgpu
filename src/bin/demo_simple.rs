@@ -1,3 +1,12 @@
+/*
+Simple Console Physics Demonstration
+
+This demo showcases the basic functionality of the physics engine by running a simple simulation
+and outputting key metrics to the console. It serves as a minimal example for users learning the
+API and validates that core physics systems are working correctly. Essential for documentation,
+tutorials, and quick verification that the engine installation is functional.
+*/
+
 use physics_core::{body::Body, gpu::GpuContext};
 use pollster::block_on;
 use bytemuck::{Pod, Zeroable};

@@ -1,3 +1,10 @@
+/*
+ * Visualization debug analysis test - validates matrix transformations and coordinate space conversions
+ * for physics body positioning. Tests view-projection matrix calculations and vertex transformations
+ * without full rendering. Essential for diagnosing physics visualization issues as it isolates
+ * mathematical transforms from GPU rendering, helping identify incorrect body positioning or camera bugs.
+ */
+
 #[cfg(not(feature = "viz"))]
 compile_error!("This test requires the 'viz' feature. Run with: cargo run --features viz --bin test_viz_debug");
 

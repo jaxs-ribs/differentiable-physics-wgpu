@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+Physics Integrator Validation Test
+
+This test ensures that the GPU-based semi-implicit Euler integrator produces identical results to a
+reference CPU implementation. By comparing position and velocity updates step-by-step, we verify
+numerical correctness and catch regressions in the core physics loop. This is crucial for maintaining
+simulation accuracy and deterministic behavior across GPU/CPU implementations.
+"""
 import numpy as np
 import subprocess
 import json

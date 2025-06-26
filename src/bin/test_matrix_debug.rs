@@ -1,3 +1,12 @@
+/*
+Interactive Matrix Math Debug Tool
+
+This visualization tool allows interactive debugging of matrix transformations and camera operations
+in the 3D rendering pipeline. It helps identify transformation errors, projection issues, and
+coordinate system problems by providing real-time visual feedback. Critical for debugging rendering
+problems and ensuring correct spatial transformations in the visualization system.
+*/
+
 #[cfg(not(feature = "viz"))]
 compile_error!("This test requires the 'viz' feature. Run with: cargo run --features viz --bin test_matrix_debug");
 

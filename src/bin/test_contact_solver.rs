@@ -1,3 +1,12 @@
+/*
+GPU Contact Solver Integration Test
+
+This test validates that the GPU-accelerated penalty-based contact solver correctly processes
+collision constraints and updates body velocities. It verifies memory layout compatibility,
+buffer synchronization, and numerical accuracy of the WGSL contact resolution kernels. Essential
+for catching GPU-specific issues in collision response and maintaining physics correctness.
+*/
+
 use physics_core::{body::Body, gpu::GpuContext, contact::Contact};
 use pollster::block_on;
 use bytemuck::{Pod, Zeroable};

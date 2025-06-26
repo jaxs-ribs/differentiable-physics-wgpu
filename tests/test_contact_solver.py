@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+Contact Solver Physics Validation Test
+
+This test verifies that the penalty-based contact solver correctly resolves collisions between rigid
+bodies. It validates conservation of momentum, proper separation of penetrating objects, and realistic
+bounce behavior. Accurate contact resolution is essential for stable multi-body dynamics and prevents
+objects from falling through surfaces or exhibiting unphysical behavior.
+"""
 import numpy as np
 import subprocess
 import json

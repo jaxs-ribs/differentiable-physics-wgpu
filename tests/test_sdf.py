@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+Signed Distance Function (SDF) Validation Test
+
+This test validates that our GPU SDF implementations for sphere, box, and capsule primitives match 
+mathematical reference implementations. SDFs are the foundation of collision detection - incorrect
+distance calculations lead to physics artifacts, penetrations, or missed collisions. By testing
+across various positions and shapes, we ensure reliable collision detection for all supported primitives.
+"""
 import numpy as np
 import subprocess
 import json

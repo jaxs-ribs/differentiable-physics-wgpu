@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Fuzz testing for SDF properties using hypothesis."""
+"""
+SDF Property-Based Fuzz Testing
+
+This test uses automated fuzzing to validate mathematical properties of SDF functions across thousands
+of random input combinations. It checks distance continuity, non-negativity outside shapes, and
+consistency across different query points. Property-based testing catches edge cases that manual tests
+miss, ensuring robust collision detection behavior under all possible geometric configurations.
+"""
 
 import numpy as np
 from hypothesis import given, strategies as st, settings
