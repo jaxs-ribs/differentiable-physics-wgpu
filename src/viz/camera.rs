@@ -1,12 +1,14 @@
+use glam::{Mat4, Vec3};
+
 const DEFAULT_FOV_DEGREES: f32 = 45.0;
 const NEAR_PLANE: f32 = 0.1;
 const FAR_PLANE: f32 = 1000.0;
-const CAMERA_POSITION: [f32; 3] = [0.0, 20.0, 50.0];
-const CAMERA_TARGET: [f32; 3] = [0.0, 5.0, 0.0];
-const UP_VECTOR: [f32; 3] = [0.0, 1.0, 0.0];
+const CAMERA_POSITION: Vec3 = Vec3::new(30.0, 30.0, 30.0);
+const CAMERA_TARGET: Vec3 = Vec3::new(0.0, 5.0, 0.0);
+const UP_VECTOR: Vec3 = Vec3::Y;
 
 pub struct Camera {
-    view_projection_matrix: [[f32; 4]; 4],
+    view_projection_matrix: Mat4,
 }
 
 impl Camera {
@@ -19,47 +21,23 @@ impl Camera {
         self.view_projection_matrix = Self::create_view_projection_matrix(aspect_ratio);
     }
     
-    pub fn view_projection_matrix(&self) -> [[f32; 4]; 4] {
+    pub fn view_projection_matrix(&self) -> Mat4 {
         self.view_projection_matrix
     }
     
     pub fn view_projection_matrix_transposed(&self) -> [[f32; 4]; 4] {
-        transpose_matrix(&self.view_projection_matrix)
+        self.view_projection_matrix.transpose().to_cols_array_2d()
     }
     
-    fn create_view_projection_matrix(aspect_ratio: f32) -> [[f32; 4]; 4] {
-        let projection = Self::create_perspective_matrix(aspect_ratio);
-        let view = Self::create_look_at_matrix();
-        matrix_multiply(&projection, &view)
-    }
-    
-    fn create_perspective_matrix(aspect_ratio: f32) -> [[f32; 4]; 4] {
-        let fov_radians = DEFAULT_FOV_DEGREES.to_radians();
-        let f = 1.0 / (fov_radians / 2.0).tan();
-        
-        [
-            [f / aspect_ratio, 0.0, 0.0, 0.0],
-            [0.0, f, 0.0, 0.0],
-            [0.0, 0.0, FAR_PLANE / (FAR_PLANE - NEAR_PLANE), 1.0],
-            [0.0, 0.0, -(FAR_PLANE * NEAR_PLANE) / (FAR_PLANE - NEAR_PLANE), 0.0],
-        ]
-    }
-    
-    fn create_look_at_matrix() -> [[f32; 4]; 4] {
-        let forward = normalize([
-            CAMERA_TARGET[0] - CAMERA_POSITION[0],
-            CAMERA_TARGET[1] - CAMERA_POSITION[1],
-            CAMERA_TARGET[2] - CAMERA_POSITION[2],
-        ]);
-        let right = normalize(cross(forward, UP_VECTOR));
-        let up = cross(right, forward);
-        
-        [
-            [right[0], up[0], -forward[0], 0.0],
-            [right[1], up[1], -forward[1], 0.0],
-            [right[2], up[2], -forward[2], 0.0],
-            [-dot(right, CAMERA_POSITION), -dot(up, CAMERA_POSITION), dot(forward, CAMERA_POSITION), 1.0],
-        ]
+    fn create_view_projection_matrix(aspect_ratio: f32) -> Mat4 {
+        let projection = Mat4::perspective_rh(
+            DEFAULT_FOV_DEGREES.to_radians(),
+            aspect_ratio,
+            NEAR_PLANE,
+            FAR_PLANE,
+        );
+        let view = Mat4::look_at_rh(CAMERA_POSITION, CAMERA_TARGET, UP_VECTOR);
+        projection * view
     }
 }
 

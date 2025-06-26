@@ -264,12 +264,12 @@ impl Renderer {
             occlusion_query_set: None,
         });
         
-        render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.bind_group, &[]);
-        render_pass.set_vertex_buffer(0, self.line_buffer.slice(..));
-        
-        println!("Drawing {} vertices", vertex_count);
-        render_pass.draw(0..vertex_count, 0..1);
+        if vertex_count > 0 {
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.line_buffer.slice(..));
+            render_pass.draw(0..vertex_count, 0..1);
+        }
     }
     
     fn update_uniform_buffer(&self, gpu: &GpuContext) {
