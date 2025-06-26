@@ -665,7 +665,7 @@ def main():
     """Main entry point for the physics engine."""
     parser = argparse.ArgumentParser(description='Physics engine reference implementation')
     parser.add_argument('--dump', type=str, help='Dump state after one step to file')
-    parser.add_argument('--steps', type=int, default=1, help='Number of steps to run')
+    parser.add_argument('--steps', type=int, default=100, help='Number of steps to run')
     args = parser.parse_args()
     
     # Create and run simulation
