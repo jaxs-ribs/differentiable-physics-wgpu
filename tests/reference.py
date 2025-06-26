@@ -563,6 +563,10 @@ class Integrator:
     
     def integrate(self, body: Body, acceleration: np.ndarray, angular_accel: np.ndarray = None):
         """Update body position and velocity using semi-implicit Euler."""
+        # Skip integration for static bodies (mass > 1e6)
+        if body.mass > 1e6:
+            return
+            
         # Linear motion
         body.velocity += acceleration * self.dt
         body.position += body.velocity * self.dt
@@ -621,8 +625,10 @@ class CollisionResolver:
         # Relative velocity along normal
         v_rel_n = np.dot(v_rel, normal)
         
-        # Don't resolve if velocities are separating
+        # Don't resolve if velocities are separating (but still apply position correction)
         if v_rel_n > 0:
+            # Still need position correction even if velocities are separating
+            self._apply_position_correction(body_a, body_b, distance, normal)
             return
         
         # Get inverse masses and inertias
@@ -654,6 +660,39 @@ class CollisionResolver:
         # Apply impulse to angular velocities
         body_a.angular_vel -= I_inv_a @ np.cross(r_a, impulse)
         body_b.angular_vel += I_inv_b @ np.cross(r_b, impulse)
+        
+        # Position correction to resolve penetration
+        # Use a fraction of the penetration to avoid overshooting
+        correction_percent = 0.8  # Usually 80% to 100%
+        slop = 0.01  # Small penetration is allowed
+        correction_magnitude = max(-distance - slop, 0.0) / (inv_mass_a + inv_mass_b) * correction_percent
+        
+        if correction_magnitude > 0:
+            correction = normal * correction_magnitude
+            body_a.position -= correction * inv_mass_a
+            body_b.position += correction * inv_mass_b
+    
+    def _apply_position_correction(self, body_a: Body, body_b: Body, distance: float, normal: np.ndarray):
+        """Apply position correction for overlapping bodies."""
+        if distance >= 0:
+            return
+            
+        # Get inverse masses
+        inv_mass_a = 1.0 / body_a.mass if body_a.mass < 1e6 else 0.0
+        inv_mass_b = 1.0 / body_b.mass if body_b.mass < 1e6 else 0.0
+        
+        if inv_mass_a + inv_mass_b < 1e-6:
+            return  # Both bodies are static
+            
+        # Position correction
+        correction_percent = 0.8
+        slop = 0.01
+        correction_magnitude = max(-distance - slop, 0.0) / (inv_mass_a + inv_mass_b) * correction_percent
+        
+        if correction_magnitude > 0:
+            correction = normal * correction_magnitude
+            body_a.position -= correction * inv_mass_a
+            body_b.position += correction * inv_mass_b
 
 
 # ============================================================================

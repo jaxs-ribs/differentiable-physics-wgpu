@@ -174,34 +174,34 @@ def main():
                 "gravity": [0, -9.81, 0],
                 "bodies": [
                     {
-                        "shape_type": "box",
+                        "shape_type": "sphere",
                         "position": [0, 0, 0],
                         "velocity": [0, 0, 0],
                         "orientation": [1, 0, 0, 0],
                         "angular_velocity": [0, 0, 0],
                         "mass": 1000.0,
                         "inertia_scale": 1000.0,
-                        "shape_params": [10, 0.5, 10]
+                        "shape_params": [5, 0, 0]  # Large ground sphere
                     },
                     {
-                        "shape_type": "box",
-                        "position": [0, 2, 0],
+                        "shape_type": "sphere",
+                        "position": [0, 7, 0],
                         "velocity": [0, 0, 0],
                         "orientation": [1, 0, 0, 0],
                         "angular_velocity": [0, 0, 0],
                         "mass": 1.0,
-                        "inertia_scale": 1.0,
-                        "shape_params": [1, 1, 1]
+                        "inertia_scale": 0.4,  # Sphere inertia factor
+                        "shape_params": [1, 0, 0]
                     },
                     {
-                        "shape_type": "box",
-                        "position": [0, 4.5, 0],
+                        "shape_type": "sphere",
+                        "position": [2, 8, 0],
                         "velocity": [0, 0, 0],
                         "orientation": [1, 0, 0, 0],
                         "angular_velocity": [0, 0, 0],
                         "mass": 1.0,
-                        "inertia_scale": 1.0,
-                        "shape_params": [1, 1, 1]
+                        "inertia_scale": 0.4,
+                        "shape_params": [1, 0, 0]
                     }
                 ]
             }
