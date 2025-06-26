@@ -1,3 +1,9 @@
+[workspace]
+resolver = "2"
+members = [
+    ".",
+]
+
 [package]
 name = "physics_core"
 version = "0.1.0"
@@ -12,9 +18,14 @@ winit = { version = "0.30", optional = true }
 futures = "0.3"
 glam = { version = "0.29", optional = true }
 
+[lib]
+name = "physics_core"
+path = "src/lib.rs"
+
 [features]
 default = []
 viz = ["dep:winit", "dep:glam"]
+all = ["viz"]
 
 [[bench]]
 name = "thruput"
@@ -24,17 +35,30 @@ harness = false
 criterion = "0.5"
 
 [[bin]]
+name = "test_contact_solver"
+path = "src/bin/test_contact_solver.rs"
+
+[[bin]]
 name = "test_viz_triangle"
+path = "src/bin/test_viz_triangle.rs"
 required-features = ["viz"]
 
 [[bin]]
 name = "test_viz_debug_vertices"
+path = "src/bin/test_viz_debug_vertices.rs"
 required-features = ["viz"]
 
 [[bin]]
 name = "test_viz_pipeline"
+path = "src/bin/test_viz_pipeline.rs"
 required-features = ["viz"]
 
 [[bin]]
 name = "test_matrix_debug"
+path = "src/bin/test_matrix_debug.rs"
+required-features = ["viz"]
+
+[[bin]]
+name = "test_viz_simple"
+path = "src/bin/test_viz_simple.rs"
 required-features = ["viz"]
