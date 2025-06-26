@@ -4,9 +4,7 @@ A high-performance, GPU-accelerated rigid body physics engine built with Rust an
 
 ## 🚀 Performance
 
-- **630M+ body×steps/s** on consumer GPUs
-- Zero-copy GPU execution - simulation state never leaves the GPU
-- Supports 20,000+ simultaneous bodies
+TBD
 
 ## 🏗️ Architecture Overview
 
