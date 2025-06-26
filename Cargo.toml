@@ -62,3 +62,18 @@ required-features = ["viz"]
 name = "test_viz_simple"
 path = "src/bin/test_viz_simple.rs"
 required-features = ["viz"]
+
+[[bin]]
+name = "demo_viz"
+path = "src/bin/demo_viz.rs"
+required-features = ["viz"]
+
+[[bin]]
+name = "test_viz_debug"
+path = "src/bin/test_viz_debug.rs"
+required-features = ["viz"]
+
+[[bin]]
+name = "test_wireframe_direct"
+path = "src/bin/test_wireframe_direct.rs"
+required-features = ["viz"]

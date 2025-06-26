@@ -103,7 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _padding: [0.0; 4],
     };
     
-    let _params_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let params_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Params Buffer"),
         contents: bytemuck::cast_slice(&[sim_params]),
         usage: wgpu::BufferUsages::UNIFORM,
@@ -129,6 +129,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
     
@@ -139,6 +149,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             wgpu::BindGroupEntry {
                 binding: 0,
                 resource: bodies_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: params_buffer.as_entire_binding(),
             },
         ],
     });
@@ -170,7 +184,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::sleep(std::time::Duration::from_secs(1));
     
     let start_time = Instant::now();
-    let dt = 0.016; // 60 FPS
+    let _dt = 0.016; // 60 FPS
     
     loop {
         // Run physics step

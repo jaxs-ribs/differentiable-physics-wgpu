@@ -2,8 +2,6 @@ use crate::gpu::GpuContext;
 use super::buffer_manager::BufferManager;
 use wgpu::{BindGroup, BindGroupLayout, ComputePipeline};
 
-const PHYSICS_SHADER_PATH: &str = "shaders/physics_step.wgsl";
-
 pub struct GpuPipeline {
     bind_group: BindGroup,
     compute_pipeline: ComputePipeline,

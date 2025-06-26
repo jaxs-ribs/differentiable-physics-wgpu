@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Initialize grid
     let grid_data: Vec<CellData> = vec![CellData { count: 0, body_ids: [0; 32] }; total_cells as usize];
-    let grid_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let _grid_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Grid Buffer"),
         contents: bytemuck::cast_slice(&grid_data),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
@@ -94,7 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_bodies_per_cell: 32,
     };
     
-    let params_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let _params_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Broadphase Params Buffer"),
         contents: bytemuck::cast_slice(&[params]),
         usage: wgpu::BufferUsages::UNIFORM,

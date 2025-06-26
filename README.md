@@ -8,10 +8,10 @@ This project is currently at the end of **Phase 1**, resulting in a functional, 
 
 - **GPU Compute Pipeline:** Physics steps execute entirely on the GPU using WGSL compute shaders.
 - **Physics Primitives:**
-    - Semi-implicit Euler integration
-    - Signed Distance Function (SDF) collision detection for sphere, capsule, and box shapes.
-    - A penalty-based contact model for resolving collisions.
-    - A uniform grid broad-phase to minimize collision checks.
+- Semi-implicit Euler integration
+- Signed Distance Function (SDF) collision detection for sphere, capsule, and box shapes.
+- A penalty-based contact model for resolving collisions.
+- A uniform grid broad-phase to minimize collision checks.
 - **Testing:** The GPU implementation is validated against a Python/NumPy reference implementation. The test suite includes property-based fuzzing for SDFs and multi-body stability tests.
 - **Debug Viewer:** An optional `winit`-based wireframe viewer renders body AABBs directly from GPU memory.
 
@@ -34,24 +34,33 @@ Benchmarks run on a single consumer-grade GPU, measuring throughput in simulated
 
 ### Usage
 
-Three simple scripts for everything:
-
 ```bash
 # Clone the repository
 git clone <repository-url>
 cd physicsengine/physics_core
 
 # Run all tests
-./pc-test
+cargo test --lib                                    # Rust unit tests
+python3 tests/test_integrator.py                    # Python reference tests
+python3 tests/test_sdf.py
+python3 tests/test_broadphase.py
+python3 tests/test_energy.py
+python3 tests/test_sdf_fuzz.py
+cargo run --bin test_sdf                           # GPU integration tests
+cargo run --bin test_contact_solver
+cargo run --bin test_broadphase_grid
 
 # Run benchmarks
-./pc-bench
-./pc-bench 10000        # Specific body count
+cargo run --release --bin benchmark                # Performance benchmarks
+cargo run --release --bin benchmark_full           # Full benchmark suite
 
 # Run demos
-./pc-demo               # 3D wireframe (default)
-./pc-demo simple        # Console output
-./pc-demo ascii         # ASCII visualization
+cargo run --features viz --bin demo_viz             # 3D wireframe visualization
+cargo run --bin demo_simple                         # Console output
+cargo run --bin demo_ascii                          # ASCII visualization
+
+# Get help
+cargo run --bin physics_core                        # List all available commands
 ```
 
 ## Project Technical Goals
@@ -96,8 +105,25 @@ cd physicsengine/physics_core
 All changes should be verified against the existing test suite.
 
 ```bash
-# Run all Rust and Python tests
-./run_all_tests.sh
+# Run comprehensive test suite
+cargo test --lib                                    # Rust unit tests
+python3 tests/test_integrator.py                    # Python reference tests  
+python3 tests/test_sdf.py
+python3 tests/test_broadphase.py
+python3 tests/test_contact_solver.py                # Additional Python tests
+python3 tests/test_contact_solver_gpu.py
+python3 tests/test_sdf_gpu.py
+python3 tests/test_energy.py                        # Comprehensive tests
+python3 tests/test_sdf_fuzz.py
+python3 tests/test_stability_stress.py
+cargo run --bin test_sdf                           # GPU integration tests
+cargo run --bin test_contact_solver
+cargo run --bin test_broadphase_grid
+cargo run --bin test_runner
+
+# Check code quality
+cargo check                                         # Without viz features
+cargo check --features viz                          # With viz features
 ```
 
 ## License

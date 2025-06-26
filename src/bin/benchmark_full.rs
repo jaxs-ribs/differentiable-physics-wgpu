@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _padding: [0.0; 4],
     };
     
-    let params_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let _params_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Params Buffer"),
         contents: bytemuck::cast_slice(&[sim_params]),
         usage: wgpu::BufferUsages::UNIFORM,
