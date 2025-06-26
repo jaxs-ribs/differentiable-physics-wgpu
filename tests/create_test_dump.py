@@ -23,9 +23,10 @@ ground = Body(
 )
 engine.add_body(ground)
 
+print("Adding boxes...")
 # Add some boxes to fall
-for i in range(3):
-    for j in range(3):
+for i in range(4):
+    for j in range(4):
         body = Body(
             position=np.array([i*3.0 - 3.0, 5.0 + j*3.0, 0.]),
             velocity=np.array([0., 0., 0.]),
