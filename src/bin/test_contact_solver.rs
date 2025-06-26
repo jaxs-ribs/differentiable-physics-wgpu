@@ -194,7 +194,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     encoder.copy_buffer_to_buffer(&bodies_buffer, 0, &result_staging, 0, bodies_buffer.size());
     
     gpu.queue.submit(Some(encoder.finish()));
-    gpu.device.poll(wgpu::Maintain::Wait);
+    gpu.device.poll(wgpu::MaintainBase::Wait);
     
     // Read initial state
     let initial_slice = initial_staging.slice(..);
@@ -202,7 +202,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     initial_slice.map_async(wgpu::MapMode::Read, move |result| {
         tx.send(result).unwrap();
     });
-    gpu.device.poll(wgpu::Maintain::Wait);
+    gpu.device.poll(wgpu::MaintainBase::Wait);
     block_on(rx).unwrap().unwrap();
     
     let initial_data = initial_slice.get_mapped_range();
@@ -216,7 +216,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     result_slice.map_async(wgpu::MapMode::Read, move |result| {
         tx.send(result).unwrap();
     });
-    gpu.device.poll(wgpu::Maintain::Wait);
+    gpu.device.poll(wgpu::MaintainBase::Wait);
     block_on(rx).unwrap().unwrap();
     
     let result_data = result_slice.get_mapped_range();

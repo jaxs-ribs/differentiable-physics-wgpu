@@ -288,7 +288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     encoder.copy_buffer_to_buffer(&pair_count_buffer, 0, &pair_count_staging, 0, 4);
     
     gpu.queue.submit(Some(encoder.finish()));
-    gpu.device.poll(wgpu::Maintain::Wait);
+    gpu.device.poll(wgpu::MaintainBase::Wait);
     
     // Read pair count
     let count_slice = pair_count_staging.slice(..);
@@ -296,7 +296,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     count_slice.map_async(wgpu::MapMode::Read, move |result| {
         tx.send(result).unwrap();
     });
-    gpu.device.poll(wgpu::Maintain::Wait);
+    gpu.device.poll(wgpu::MaintainBase::Wait);
     block_on(rx).unwrap().unwrap();
     
     let count_data = count_slice.get_mapped_range();
@@ -325,14 +325,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         encoder.copy_buffer_to_buffer(&pairs_buffer, 0, &pairs_staging, 0, pairs_staging.size());
         
         gpu.queue.submit(Some(encoder.finish()));
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::MaintainBase::Wait);
         
         let pairs_slice = pairs_staging.slice(..);
         let (tx, rx) = futures::channel::oneshot::channel();
         pairs_slice.map_async(wgpu::MapMode::Read, move |result| {
             tx.send(result).unwrap();
         });
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::MaintainBase::Wait);
         block_on(rx).unwrap().unwrap();
         
         let pairs_data = pairs_slice.get_mapped_range();

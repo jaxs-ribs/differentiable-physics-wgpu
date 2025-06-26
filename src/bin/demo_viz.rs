@@ -198,7 +198,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     encoder.copy_buffer_to_buffer(&bodies_buffer, 0, &staging_buffer, 0, staging_buffer.size());
                     
                     gpu.queue.submit(Some(encoder.finish()));
-                    gpu.device.poll(wgpu::Maintain::Wait);
+                    gpu.device.poll(wgpu::MaintainBase::Wait);
                     
                     // Read back positions
                     let buffer_slice = staging_buffer.slice(..);
@@ -206,7 +206,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
                         tx.send(result).unwrap();
                     });
-                    gpu.device.poll(wgpu::Maintain::Wait);
+                    gpu.device.poll(wgpu::MaintainBase::Wait);
                     block_on(rx).unwrap().unwrap();
                     
                     let data = buffer_slice.get_mapped_range();

@@ -1,169 +1,159 @@
-# WebGPU Physics Engine
+# Physics Core - WebGPU Rigid Body Physics Engine
 
-A high-performance rigid-body physics engine designed for GPU execution via WebGPU. Features semi-implicit Euler integration, SDF-based collision detection, and support for spheres, capsules, and boxes.
+A high-performance, GPU-accelerated rigid body physics engine built with Rust and WebGPU. Designed for massively parallel simulation of thousands of bodies entirely on the GPU.
 
-## Core Features
+## 🚀 Performance
 
-- **GPU Compute Pipeline:** Physics steps execute entirely on the GPU using WGSL compute shaders
-- **Semi-implicit Euler integration** for stable motion
-- **SDF collision detection** supporting spheres, capsules, and boxes
-- **Penalty-based contact resolution** 
-- **Uniform grid broadphase** for efficient collision culling
-- **Comprehensive test suite** with Python reference implementation
-- **3D wireframe visualization** (optional)
+- **630M+ body×steps/s** on consumer GPUs
+- Zero-copy GPU execution - simulation state never leaves the GPU
+- Supports 20,000+ simultaneous bodies
 
-## Performance
+## 🏗️ Architecture Overview
 
-Benchmarks run on a single consumer-grade GPU, measuring throughput in simulated bodies multiplied by simulation steps per second.
+### Core Components
 
-| Body Count | Throughput (body-steps/s) |
-| :--- | :--- |
-| 1,000      | 28,000,000+               |
-| 10,000     | 302,000,000+              |
-| 20,000     | **630,000,000+**              |
+```
+physics_core/
+├── src/
+│   ├── lib.rs                 # Library root
+│   ├── body.rs               # Rigid body data structure (112 bytes, GPU-aligned)
+│   ├── gpu.rs                # WebGPU context and initialization
+│   ├── physics/              # Physics simulation modules
+│   │   ├── mod.rs           # Module exports
+│   │   ├── buffer_manager.rs # GPU buffer management
+│   │   ├── compute_executor.rs # Compute shader execution
+│   │   ├── pipeline_builder.rs # Pipeline construction
+│   │   └── shader_loader.rs  # WGSL shader loading
+│   ├── shaders/              # WGSL compute shaders
+│   │   ├── physics_step.wgsl # Main physics integration
+│   │   ├── broadphase.wgsl   # Collision detection broadphase
+│   │   ├── narrowphase.wgsl  # Detailed collision detection
+│   │   └── contact_solver.wgsl # Collision resolution
+│   ├── test_utils/           # Testing utilities
+│   │   ├── gpu_helpers.rs    # GPU testing helpers
+│   │   └── harness.rs        # Test harness
+│   └── viz/                  # Visualization (optional feature)
+│       ├── camera.rs         # 3D camera controls
+│       ├── dual_renderer.rs  # Debug visualization renderer
+│       ├── uniforms.rs       # GPU uniform buffers
+│       ├── window.rs         # Window management
+│       └── wireframe_geometry.rs # Wireframe generation
+```
 
-## Quick Start
+### Key Design Principles
+
+1. **GPU-First Architecture**: All physics computations happen on GPU via compute shaders
+2. **Structure of Arrays (SoA)**: Optimized memory layout for GPU parallelism
+3. **Lock-Step Parity**: GPU implementation validated against Python/NumPy reference
+4. **Zero-Copy Execution**: Data stays on GPU throughout simulation
+
+## 🛠️ Quick Start
 
 ### Prerequisites
 
-- Rust toolchain (`rustup`)
-- Python 3.x
+- Rust toolchain (via [rustup](https://rustup.rs/))
+- Python 3.x (for reference tests)
+- WebGPU-capable GPU
 
-### Usage
+### Basic Usage
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd physicsengine/physics_core
-
-# Run all tests
-./pc-test                                          # Run all tests (recommended)
-# Or run individual test suites:
-cargo test --lib                                   # Rust unit tests
-cd tests
-python3 test_sdf_quick.py                          # Quick SDF validation
-python3 test_energy.py                             # Energy conservation
-python3 test_broadphase_sap.py                     # Sweep and Prune broadphase
-python3 test_dynamics.py                           # Rotational dynamics
-./run_all_tests.sh                                 # Run all Python tests
+# Clone and build
+git clone <repository>
+cd physics_core
+cargo build --release
 
 # Run benchmarks
-./pc-bench                                         # Quick benchmark (default: 10k bodies)
-./pc-bench 20000                                   # Benchmark with 20k bodies
-cargo run --release --bin benchmark_full           # Full benchmark suite
+cargo run --release --bin benchmark -- 10000
 
-# Run demos
-./pc-demo viz                                      # 3D wireframe visualization
-./pc-demo simple                                   # Console output
-./pc-demo ascii                                    # ASCII visualization
+# Run visual demo (requires 'viz' feature)
+cargo run --release --features viz --bin demo_viz
 
-# Debug tools
-cargo run --features viz --bin debug_viz           # Visual state inspector/differ
-python3 tests/plot_energy.py                       # Plot energy conservation
+# Run physics animation player
+cargo run --release --features viz --bin debug_viz -- --oracle tests/oracle_dump.npy
 ```
 
-## Technical Details
-
-- **Zero-copy GPU execution:** Simulation state remains on GPU throughout execution
-- **Consistent memory layout:** `Body` structure matches exactly between Rust and WGSL
-- **Validated correctness:** GPU implementation tested against Python/NumPy reference
-
-## Development
-
-All changes should be verified against the existing test suite.
+### Running Tests
 
 ```bash
-# Run comprehensive test suite
-cargo test --lib                                    # Rust unit tests
-python3 tests/test_integrator.py                    # Python reference tests  
-python3 tests/test_sdf.py
-python3 tests/test_sdf_quick.py                     # Quick SDF validation
-python3 tests/test_implementations.py                # Test broadphase + dynamics
-python3 tests/test_contact_solver.py                # Additional Python tests
-python3 tests/test_contact_solver_gpu.py
-python3 tests/test_sdf_gpu.py
-python3 tests/test_energy.py                        # Comprehensive tests
-python3 tests/test_sdf_fuzz.py
-python3 tests/test_stability_stress.py
-cargo run --bin test_sdf                           # GPU integration tests
-cargo run --bin test_contact_solver
-cargo run --bin test_broadphase_grid
-cargo run --bin test_runner
+# Run all Rust tests
+cargo test
 
-# Check code quality
-cargo check                                         # Without viz features
-cargo check --features viz                          # With viz features
-```
-
-## Debug and Analysis Tools
-
-### Smart Test Failure System
-
-When GPU-CPU parity tests fail, the system automatically saves both states:
-
-```bash
-# Run tests with automatic failure dumps
-pytest tests/test_gpu_cpu_parity.py
-
-# Files created on failure:
-tests/failures/<test_name>/
-├── cpu_state.npy      # CPU physics state
-├── gpu_state.npy      # GPU physics state
-└── debug_info.txt     # Test details and traceback
-
-# Keep old failures (default cleans up before each test)
-pytest tests/test_gpu_cpu_parity.py --keep-failures
-```
-
-### Visual State Inspector and Debugger
-
-The `debug_viz` tool provides flexible state visualization with three distinct modes:
-
-```bash
-# Mode 1: DEFAULT/DEMO MODE - Test the renderer with a hardcoded scene
-cargo run --features viz --bin debug_viz
-# Shows: 3 white spheres in a simple stack
-
-# Mode 2: INSPECT MODE - Visualize a single state file
-cargo run --features viz --bin debug_viz -- --oracle tests/oracle_dump.npy
-# OR
-cargo run --features viz --bin debug_viz -- --gpu tests/gpu_dump.npy
-# Shows: The loaded state in white
-
-# Mode 3: DIFF MODE - Compare two states side-by-side
-cargo run --features viz --bin debug_viz -- \
-  --oracle tests/failures/test_name/cpu_state.npy \
-  --gpu tests/failures/test_name/gpu_state.npy
-# Shows: Oracle in green/transparent, GPU in red/opaque
-
-# Controls:
-# - B: Toggle AABB visualization
-# - C: Toggle contact points
-# - ESC: Exit
-```
-
-This tool is immediately useful for:
-- **Debugging oracle behavior**: Inspect Python physics states visually
-- **Finding divergences**: Compare CPU vs GPU states when tests fail
-- **Testing renderer**: Verify visualization works without any dependencies
-
-### Energy Conservation Analysis
-
-Track system energy over time to detect instabilities:
-
-```bash
-# Plot energy conservation
+# Run Python reference tests
 cd tests
-python3 plot_energy.py --scene scenes/stack.json --steps 1000
+python3 test_sdf_quick.py      # Quick validation
+python3 test_energy.py          # Energy conservation
+python3 test_implementations.py # Implementation tests
 
-# Outputs: energy_drift.png
-# Shows total energy (kinetic + potential) over time
-# Warns if drift exceeds 5%
-
-# Custom scene
-python3 plot_energy.py --scene my_scene.json --output my_energy.png
+# Create and visualize a physics trace
+python3 create_test_dump.py
+cd ..
+cargo run --features viz --bin debug_viz -- --oracle tests/oracle_dump.npy
 ```
 
-## License
+## 📦 Features
 
-This project is licensed under the MIT License.
+### Core Physics
+- Semi-implicit Euler integration
+- Sphere, Box, and Capsule collision shapes
+- Signed Distance Function (SDF) based collision detection
+- Impulse-based collision resolution
+- Broadphase collision culling
+
+### Visualization (`viz` feature)
+- Real-time 3D wireframe rendering
+- Physics state inspection and debugging
+- Animation playback from trace files
+- Camera controls (mouse drag to rotate, scroll to zoom)
+
+### Debug Tools
+- `debug_viz`: Animated physics trace player
+- `plot_energy.py`: Energy conservation analysis
+- State comparison tools for GPU/CPU parity testing
+
+## 🔧 Building
+
+```bash
+# Basic build
+cargo build --release
+
+# With visualization
+cargo build --release --features viz
+
+# Run specific binary
+cargo run --release --features viz --bin <binary_name>
+```
+
+## 📊 Benchmarking
+
+```bash
+# Quick benchmark (10k bodies)
+cargo run --release --bin benchmark
+
+# Full benchmark suite
+cargo run --release --bin benchmark_full
+
+# Custom body count
+cargo run --release --bin benchmark -- 20000
+```
+
+## 🧪 Testing Philosophy
+
+The project maintains correctness through extensive testing against a Python/NumPy reference implementation:
+
+1. **Reference Implementation** (`tests/reference.py`): Golden standard for physics behavior
+2. **Property-Based Testing**: Validates mathematical properties (symmetry, conservation laws)
+3. **GPU-CPU Parity**: Ensures GPU results match CPU reference exactly
+
+## 📝 Project Status
+
+This is an active research project exploring GPU-accelerated physics simulation. The codebase is designed for experimentation and may undergo significant changes.
+
+## 🔗 Related Documentation
+
+- [AGENTS.md](AGENTS.md) - Detailed development history and roadmap
+- [Overview files](src/bin/overview.md) - Descriptions of all binaries and tests
+
+## 📄 License
+
+MIT License - See LICENSE file for details.

@@ -42,51 +42,15 @@ criterion = "0.5"
 name = "test_contact_solver"
 path = "src/bin/test_contact_solver.rs"
 
-[[bin]]
-name = "test_viz_triangle"
-path = "src/bin/test_viz_triangle.rs"
-required-features = ["viz"]
-
-[[bin]]
-name = "test_viz_debug_vertices"
-path = "src/bin/test_viz_debug_vertices.rs"
-required-features = ["viz"]
-
-[[bin]]
-name = "test_viz_pipeline"
-path = "src/bin/test_viz_pipeline.rs"
-required-features = ["viz"]
-
-[[bin]]
-name = "test_matrix_debug"
-path = "src/bin/test_matrix_debug.rs"
-required-features = ["viz"]
-
-[[bin]]
-name = "test_viz_simple"
-path = "src/bin/test_viz_simple.rs"
-required-features = ["viz"]
 
 [[bin]]
 name = "demo_viz"
 path = "src/bin/demo_viz.rs"
 required-features = ["viz"]
 
-[[bin]]
-name = "test_viz_debug"
-path = "src/bin/test_viz_debug.rs"
-required-features = ["viz"]
-
-[[bin]]
-name = "test_wireframe_direct"
-path = "src/bin/test_wireframe_direct.rs"
-required-features = ["viz"]
 
 [[bin]]
 name = "debug_viz"
 path = "src/bin/debug_viz.rs"
 required-features = ["viz"]
 
-[[bin]]
-name = "test_matrix_column"
-path = "src/bin/test_matrix_column.rs"

@@ -247,7 +247,7 @@ fn physics_step(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             
             gpu.queue.submit(Some(encoder.finish()));
-            gpu.device.poll(wgpu::Maintain::Wait);
+            gpu.device.poll(wgpu::MaintainBase::Wait);
         }
         
         // Benchmark
@@ -275,7 +275,7 @@ fn physics_step(@builtin(global_invocation_id) global_id: vec3<u32>) {
             gpu.queue.submit(Some(encoder.finish()));
         }
         
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::MaintainBase::Wait);
         
         let elapsed = start.elapsed();
         let total_body_steps = (num_bodies * num_steps) as f64;

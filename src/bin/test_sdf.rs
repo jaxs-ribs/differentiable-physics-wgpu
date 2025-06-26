@@ -169,7 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     encoder.copy_buffer_to_buffer(&contact_count_buffer, 0, &count_staging, 0, 4);
     
     gpu.queue.submit(Some(encoder.finish()));
-    gpu.device.poll(wgpu::Maintain::Wait);
+    gpu.device.poll(wgpu::MaintainBase::Wait);
     
     // Read results
     let count_slice = count_staging.slice(..);
@@ -177,7 +177,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     count_slice.map_async(wgpu::MapMode::Read, move |result| {
         tx.send(result).unwrap();
     });
-    gpu.device.poll(wgpu::Maintain::Wait);
+    gpu.device.poll(wgpu::MaintainBase::Wait);
     block_on(rx).unwrap().unwrap();
     
     let count_data = count_slice.get_mapped_range();
@@ -194,7 +194,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         contact_slice.map_async(wgpu::MapMode::Read, move |result| {
             tx.send(result).unwrap();
         });
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::MaintainBase::Wait);
         block_on(rx).unwrap().unwrap();
         
         let contact_data = contact_slice.get_mapped_range();

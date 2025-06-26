@@ -183,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         
         gpu.queue.submit(Some(encoder.finish()));
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::MaintainBase::Wait);
     }
     
     // Benchmark different number of steps
@@ -215,7 +215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             gpu.queue.submit(Some(encoder.finish()));
         }
         
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::MaintainBase::Wait);
         
         let elapsed = start.elapsed();
         let total_body_steps = (num_bodies * num_steps) as f64;
@@ -290,7 +290,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             gpu.queue.submit(Some(encoder.finish()));
         }
         
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::MaintainBase::Wait);
         
         let elapsed = start.elapsed();
         let ms_per_step = elapsed.as_millis() as f64 / test_steps as f64;
