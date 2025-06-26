@@ -39,7 +39,7 @@ for name, type_a, type_b, params_a, params_b in test_cases:
     body_a = create_body(type_a, [0, 0, 0], np.array([1, 0, 0, 0]), params_a)
     body_b = create_body(type_b, [5, 0, 0], np.array([1, 0, 0, 0]), params_b)
     
-    dist, normal = engine._compute_sdf_distance(body_a, body_b)
+    dist, normal, contact_point = engine._compute_sdf_distance(body_a, body_b)
     normal_mag = np.linalg.norm(normal)
     
     if abs(normal_mag - 1.0) < 1e-5 and dist > 0:
@@ -55,7 +55,7 @@ for name, type_a, type_b, params_a, params_b in test_cases[:3]:  # Just first 3
     body_a = create_body(type_a, [0, 0, 0], np.array([1, 0, 0, 0]), params_a)
     body_b = create_body(type_b, [0.5, 0, 0], np.array([1, 0, 0, 0]), params_b)
     
-    dist, normal = engine._compute_sdf_distance(body_a, body_b)
+    dist, normal, contact_point = engine._compute_sdf_distance(body_a, body_b)
     normal_mag = np.linalg.norm(normal)
     
     if abs(normal_mag - 1.0) < 1e-5 and dist < 0:
@@ -74,7 +74,7 @@ for name, type_a, type_b, params_a, params_b in test_cases[2:4]:  # Box tests
     body_a = create_body(type_a, [0, 0, 0], quat, params_a)
     body_b = create_body(type_b, [3, 0, 0], quat, params_b)
     
-    dist, normal = engine._compute_sdf_distance(body_a, body_b)
+    dist, normal, contact_point = engine._compute_sdf_distance(body_a, body_b)
     normal_mag = np.linalg.norm(normal)
     
     if abs(normal_mag - 1.0) < 1e-5:
@@ -89,7 +89,7 @@ test_count += 1
 capsule = create_body(1, [0, 0, 0], np.array([1, 0, 0, 0]), [1.0, 1.0, 0])
 box = create_body(2, [0, 0, 0], np.array([1, 0, 0, 0]), [2.0, 1.0, 1.0])
 
-dist, normal = engine._compute_sdf_distance(capsule, box)
+dist, normal, contact_point = engine._compute_sdf_distance(capsule, box)
 normal_mag = np.linalg.norm(normal)
 
 if abs(normal_mag - 1.0) < 1e-5:

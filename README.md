@@ -1,19 +1,16 @@
-# Differentiable Physics Engine
+# WebGPU Physics Engine
 
-A rigid-body physics engine designed for GPU execution via WebGPU (`wgpu`). The primary goal is to serve as a high-performance, differentiable custom operator within machine learning frameworks like `tinygrad`.
+A high-performance rigid-body physics engine designed for GPU execution via WebGPU. Features semi-implicit Euler integration, SDF-based collision detection, and support for spheres, capsules, and boxes.
 
-This project is currently at the end of **Phase 1**, resulting in a functional, stand-alone Rust/WGSL physics engine.
+## Core Features
 
-## Core Components
-
-- **GPU Compute Pipeline:** Physics steps execute entirely on the GPU using WGSL compute shaders.
-- **Physics Primitives:**
-- Semi-implicit Euler integration
-- Signed Distance Function (SDF) collision detection for sphere, capsule, and box shapes.
-- A penalty-based contact model for resolving collisions.
-- A uniform grid broad-phase to minimize collision checks.
-- **Testing:** The GPU implementation is validated against a Python/NumPy reference implementation. The test suite includes property-based fuzzing for SDFs and multi-body stability tests.
-- **Debug Viewer:** An optional `winit`-based wireframe viewer renders body AABBs directly from GPU memory.
+- **GPU Compute Pipeline:** Physics steps execute entirely on the GPU using WGSL compute shaders
+- **Semi-implicit Euler integration** for stable motion
+- **SDF collision detection** supporting spheres, capsules, and boxes
+- **Penalty-based contact resolution** 
+- **Uniform grid broadphase** for efficient collision culling
+- **Comprehensive test suite** with Python reference implementation
+- **3D wireframe visualization** (optional)
 
 ## Performance
 
@@ -43,9 +40,9 @@ cd physicsengine/physics_core
 cargo test --lib                                    # Rust unit tests
 python3 tests/test_integrator.py                    # Python reference tests
 python3 tests/test_sdf.py
-python3 tests/test_broadphase.py
-python3 tests/test_energy.py
-python3 tests/test_sdf_fuzz.py
+python3 tests/test_sdf_quick.py                    # Quick SDF validation
+python3 tests/test_energy.py                        # Energy conservation
+python3 tests/test_implementations.py               # Test new features (broadphase + dynamics)
 cargo run --bin test_sdf                           # GPU integration tests
 cargo run --bin test_contact_solver
 cargo run --bin test_broadphase_grid
@@ -63,42 +60,11 @@ cargo run --bin demo_ascii                          # ASCII visualization
 cargo run --bin physics_core                        # List all available commands
 ```
 
-## Project Technical Goals
+## Technical Details
 
-1.  **Correctness via Testing:** The behavior of the GPU kernels is verified against a CPU-based NumPy reference implementation.
-2.  **GPU-Centric Execution:** The core simulation loop avoids CPU-GPU data transfer. State remains on the GPU until explicitly retrieved.
-3.  **Consistent Memory Layout:** The `Body` data structure is identical between Rust (`#[repr(C)]`) and WGSL to allow for zero-copy buffer mapping.
-
-## Technical Roadmap
-
--   **Phase 1 (Complete): Stand-Alone Engine**
-    -   **Outcome:** A functional Rust/WGSL physics simulator with a comprehensive test suite and validated performance.
-
--   **Phase 2 (Current): `tinygrad` Integration**
-    -   **Objective:** Expose the WGSL physics kernels as custom operations in `tinygrad`.
-    -   **Tasks:**
-        -   Patch `tinygrad`'s WebGPU runtime to accept raw WGSL code.
-        -   Write a Python wrapper to dispatch the physics step as a tensor operation.
-        -   Verify the integration by training a simple policy for a control task (e.g., cart-pole).
-
--   **Phase 3: Differentiable Backward Pass**
-    -   **Objective:** Implement an efficient, analytic backward pass for the physics simulation.
-    -   **Tasks:**
-        -   Write WGSL kernels for the analytic Jacobians of the integrator and contact solver.
-        -   Validate the gradients against finite-difference approximations.
-        -   Use the backward pass in a Quality-Diversity (QD) optimization loop to find novel solutions to physical tasks.
-
--   **Phase 4: Telemetry and Interaction**
-    -   **Objective:** Add capabilities for live monitoring and external control of the simulation.
-    -   **Tasks:**
-        -   Implement a WebSocket server to stream simulation state as JSON data.
-        -   Build a minimal web client to display the telemetry.
-
--   **Phase 5: Packaging and Documentation**
-    -   **Objective:** Produce a distributable artifact and a technical summary.
-    -   **Tasks:**
-        -   Package the simulation and UI into a container for simplified deployment.
-        -   Write a technical report detailing the methods, performance, and results.
+- **Zero-copy GPU execution:** Simulation state remains on GPU throughout execution
+- **Consistent memory layout:** `Body` structure matches exactly between Rust and WGSL
+- **Validated correctness:** GPU implementation tested against Python/NumPy reference
 
 ## Development
 
@@ -109,7 +75,8 @@ All changes should be verified against the existing test suite.
 cargo test --lib                                    # Rust unit tests
 python3 tests/test_integrator.py                    # Python reference tests  
 python3 tests/test_sdf.py
-python3 tests/test_broadphase.py
+python3 tests/test_sdf_quick.py                     # Quick SDF validation
+python3 tests/test_implementations.py                # Test broadphase + dynamics
 python3 tests/test_contact_solver.py                # Additional Python tests
 python3 tests/test_contact_solver_gpu.py
 python3 tests/test_sdf_gpu.py

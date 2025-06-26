@@ -33,7 +33,7 @@ class Body:
     orientation: np.ndarray   # quaternion [w, x, y, z]
     angular_vel: np.ndarray   # [wx, wy, wz]
     mass: float
-    inertia: np.ndarray      # 3x3 tensor
+    inertia: np.ndarray      # 3x3 tensor (local space)
     shape_type: ShapeType
     shape_params: np.ndarray  # Shape-specific parameters
     
@@ -43,6 +43,24 @@ class Body:
         assert len(self.velocity) == 3, "Velocity must be 3D"
         assert len(self.orientation) == 4, "Orientation must be quaternion"
         assert self.mass > 0, "Mass must be positive"
+    
+    def get_world_inertia_inv(self) -> np.ndarray:
+        """Get inverse inertia tensor in world space."""
+        # Convert quaternion to rotation matrix
+        R = self._quaternion_to_matrix(self.orientation)
+        # I_world = R * I_local * R^T
+        # I_world_inv = R * I_local_inv * R^T
+        I_local_inv = np.linalg.inv(self.inertia)
+        return R @ I_local_inv @ R.T
+    
+    def _quaternion_to_matrix(self, q: np.ndarray) -> np.ndarray:
+        """Convert quaternion to 3x3 rotation matrix."""
+        w, x, y, z = q
+        return np.array([
+            [1 - 2*(y*y + z*z), 2*(x*y - w*z), 2*(x*z + w*y)],
+            [2*(x*y + w*z), 1 - 2*(x*x + z*z), 2*(y*z - w*x)],
+            [2*(x*z - w*y), 2*(y*z + w*x), 1 - 2*(x*x + y*y)]
+        ])
 
 
 # ============================================================================
@@ -91,24 +109,39 @@ class Quaternion:
 class CollisionDetector(Protocol):
     """Protocol for collision detection strategies."""
     
-    def compute_distance(self, body_a: Body, body_b: Body) -> Tuple[float, np.ndarray]:
-        """Compute signed distance and normal between two bodies."""
+    def compute_distance(self, body_a: Body, body_b: Body) -> Tuple[float, np.ndarray, np.ndarray]:
+        """Compute signed distance, normal, and contact point between two bodies.
+        
+        Returns:
+            distance: Signed distance (negative = penetration)
+            normal: Unit normal pointing from A to B
+            contact_point: World space contact point
+        """
         ...
 
 
 class SphereSphereDetector:
     """Collision detection for sphere-sphere pairs."""
     
-    def compute_distance(self, sphere_a: Body, sphere_b: Body) -> Tuple[float, np.ndarray]:
+    def compute_distance(self, sphere_a: Body, sphere_b: Body) -> Tuple[float, np.ndarray, np.ndarray]:
         """Compute SDF between two spheres."""
         center_vector = sphere_b.position - sphere_a.position
         center_distance = np.linalg.norm(center_vector)
-        radius_sum = sphere_a.shape_params[0] + sphere_b.shape_params[0]
+        radius_a = sphere_a.shape_params[0]
+        radius_b = sphere_b.shape_params[0]
+        radius_sum = radius_a + radius_b
         
         distance = center_distance - radius_sum
         normal = self._compute_normal(center_vector, center_distance)
         
-        return distance, normal
+        # Contact point is on the line between centers, at the surface of sphere A
+        if center_distance > 1e-6:
+            contact_point = sphere_a.position + normal * radius_a
+        else:
+            # Spheres are coincident, use center
+            contact_point = sphere_a.position
+        
+        return distance, normal, contact_point
     
     def _compute_normal(self, center_vector: np.ndarray, center_distance: float) -> np.ndarray:
         """Compute collision normal, handling edge cases."""
@@ -120,7 +153,7 @@ class SphereSphereDetector:
 class SphereCapsuleDetector:
     """Collision detection for sphere-capsule pairs."""
     
-    def compute_distance(self, sphere: Body, capsule: Body) -> Tuple[float, np.ndarray]:
+    def compute_distance(self, sphere: Body, capsule: Body) -> Tuple[float, np.ndarray, np.ndarray]:
         """Compute SDF between sphere and capsule."""
         # Transform to capsule's local space
         local_sphere_pos = self._to_local_space(
@@ -528,32 +561,175 @@ class Integrator:
     def __init__(self, dt: float = 0.016):
         self.dt = dt
     
-    def integrate(self, body: Body, acceleration: np.ndarray):
+    def integrate(self, body: Body, acceleration: np.ndarray, angular_accel: np.ndarray = None):
         """Update body position and velocity using semi-implicit Euler."""
+        # Linear motion
         body.velocity += acceleration * self.dt
         body.position += body.velocity * self.dt
-        # TODO: Integrate angular velocity and orientation
+        
+        # Angular motion
+        if angular_accel is not None:
+            body.angular_vel += angular_accel * self.dt
+        
+        # Update orientation from angular velocity
+        if np.linalg.norm(body.angular_vel) > 1e-6:
+            # Convert angular velocity to quaternion derivative
+            w = body.angular_vel
+            q = body.orientation
+            q_dot = 0.5 * self._quaternion_multiply(
+                np.array([0, w[0], w[1], w[2]]), q
+            )
+            
+            # Update quaternion
+            body.orientation += q_dot * self.dt
+            
+            # Normalize quaternion to prevent drift
+            body.orientation /= np.linalg.norm(body.orientation)
+    
+    def _quaternion_multiply(self, q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
+        """Multiply two quaternions."""
+        w1, x1, y1, z1 = q1
+        w2, x2, y2, z2 = q2
+        return np.array([
+            w1*w2 - x1*x2 - y1*y2 - z1*z2,
+            w1*x2 + x1*w2 + y1*z2 - z1*y2,
+            w1*y2 - x1*z2 + y1*w2 + z1*x2,
+            w1*z2 + x1*y2 - y1*x2 + z1*w2
+        ])
 
 
 class CollisionResolver:
-    """Handles collision response using penalty method."""
+    """Handles collision response using impulse method with rotational dynamics."""
     
-    def __init__(self, stiffness: float = 1000.0):
-        self.stiffness = stiffness
+    def __init__(self, restitution: float = 0.5):
+        self.restitution = restitution  # Coefficient of restitution
     
     def resolve(self, body_a: Body, body_b: Body, distance: float, 
-               normal: np.ndarray, dt: float):
-        """Resolve collision between two bodies."""
+               normal: np.ndarray, contact_point: np.ndarray, dt: float):
+        """Resolve collision between two bodies with full rigid body dynamics."""
         if distance >= 0:
             return  # No collision
         
-        # Penalty force proportional to penetration
-        penalty_force = -distance * self.stiffness
-        impulse = normal * penalty_force * dt
+        # Calculate vectors from centers of mass to contact point
+        r_a = contact_point - body_a.position
+        r_b = contact_point - body_b.position
         
-        # Apply equal and opposite impulses
-        body_a.velocity += impulse / body_a.mass
-        body_b.velocity -= impulse / body_b.mass
+        # Calculate relative velocity at contact point
+        v_rel = (body_b.velocity + np.cross(body_b.angular_vel, r_b) - 
+                body_a.velocity - np.cross(body_a.angular_vel, r_a))
+        
+        # Relative velocity along normal
+        v_rel_n = np.dot(v_rel, normal)
+        
+        # Don't resolve if velocities are separating
+        if v_rel_n > 0:
+            return
+        
+        # Get inverse masses and inertias
+        inv_mass_a = 1.0 / body_a.mass if body_a.mass < 1e6 else 0.0
+        inv_mass_b = 1.0 / body_b.mass if body_b.mass < 1e6 else 0.0
+        
+        I_inv_a = body_a.get_world_inertia_inv() if body_a.mass < 1e6 else np.zeros((3,3))
+        I_inv_b = body_b.get_world_inertia_inv() if body_b.mass < 1e6 else np.zeros((3,3))
+        
+        # Calculate impulse magnitude using full rigid body formula
+        r_a_cross_n = np.cross(r_a, normal)
+        r_b_cross_n = np.cross(r_b, normal)
+        
+        denominator = (inv_mass_a + inv_mass_b + 
+                      np.dot(r_a_cross_n, I_inv_a @ r_a_cross_n) +
+                      np.dot(r_b_cross_n, I_inv_b @ r_b_cross_n))
+        
+        if denominator < 1e-6:
+            return  # Avoid division by zero
+        
+        # Impulse magnitude
+        j = -(1.0 + self.restitution) * v_rel_n / denominator
+        
+        # Apply impulse to linear velocities
+        impulse = j * normal
+        body_a.velocity -= impulse * inv_mass_a
+        body_b.velocity += impulse * inv_mass_b
+        
+        # Apply impulse to angular velocities
+        body_a.angular_vel -= I_inv_a @ np.cross(r_a, impulse)
+        body_b.angular_vel += I_inv_b @ np.cross(r_b, impulse)
+
+
+# ============================================================================
+# AABB and Broadphase
+# ============================================================================
+
+@dataclass
+class AABB:
+    """Axis-Aligned Bounding Box for broadphase collision detection."""
+    min_point: np.ndarray
+    max_point: np.ndarray
+    body_index: int
+
+class BroadphaseDetector:
+    """Sweep and Prune broadphase collision detection."""
+    
+    def detect_pairs(self, aabbs: List[AABB]) -> List[Tuple[int, int]]:
+        """Detect potentially colliding pairs using Sweep and Prune."""
+        if len(aabbs) < 2:
+            return []
+        
+        # Create endpoints for each axis
+        x_endpoints = []
+        y_endpoints = []
+        z_endpoints = []
+        
+        for aabb in aabbs:
+            idx = aabb.body_index
+            # X axis
+            x_endpoints.append((aabb.min_point[0], idx, True))   # min endpoint
+            x_endpoints.append((aabb.max_point[0], idx, False))  # max endpoint
+            # Y axis
+            y_endpoints.append((aabb.min_point[1], idx, True))
+            y_endpoints.append((aabb.max_point[1], idx, False))
+            # Z axis
+            z_endpoints.append((aabb.min_point[2], idx, True))
+            z_endpoints.append((aabb.max_point[2], idx, False))
+        
+        # Sort endpoints
+        x_endpoints.sort(key=lambda x: x[0])
+        y_endpoints.sort(key=lambda x: x[0])
+        z_endpoints.sort(key=lambda x: x[0])
+        
+        # Find overlaps on each axis
+        x_overlaps = self._find_axis_overlaps(x_endpoints)
+        y_overlaps = self._find_axis_overlaps(y_endpoints)
+        z_overlaps = self._find_axis_overlaps(z_endpoints)
+        
+        # Debug output
+        # print(f"X overlaps: {sorted(x_overlaps)}")
+        # print(f"Y overlaps: {sorted(y_overlaps)}")  
+        # print(f"Z overlaps: {sorted(z_overlaps)}")
+        
+        # Intersection of all three axes gives potentially colliding pairs
+        potential_pairs = x_overlaps & y_overlaps & z_overlaps
+        
+        # Convert to sorted list of tuples
+        return sorted(list(potential_pairs))
+    
+    def _find_axis_overlaps(self, endpoints: List[Tuple[float, int, bool]]) -> set:
+        """Find overlapping pairs on a single axis."""
+        active = set()
+        overlaps = set()
+        
+        for pos, body_idx, is_min in endpoints:
+            if is_min:
+                # Starting interval - check overlap with all active intervals
+                for other_idx in active:
+                    pair = (min(body_idx, other_idx), max(body_idx, other_idx))
+                    overlaps.add(pair)
+                active.add(body_idx)
+            else:
+                # Ending interval
+                active.discard(body_idx)
+        
+        return overlaps
 
 
 # ============================================================================
@@ -572,6 +748,7 @@ class PhysicsEngine:
         self.integrator = Integrator(dt)
         self.collision_resolver = CollisionResolver()
         self.detector_factory = CollisionDetectorFactory()
+        self.broadphase = BroadphaseDetector()
     
     def add_body(self, body: Body):
         """Add a body to the simulation."""
@@ -588,27 +765,129 @@ class PhysicsEngine:
             # For now, only gravity
             self.integrator.integrate(body, self.gravity)
     
+    def _compute_aabb(self, body: Body) -> AABB:
+        """Compute world-space AABB for a body."""
+        if body.shape_type == ShapeType.SPHERE:
+            radius = body.shape_params[0]
+            return AABB(
+                min_point=body.position - radius,
+                max_point=body.position + radius,
+                body_index=-1  # Will be set by caller
+            )
+        elif body.shape_type == ShapeType.CAPSULE:
+            radius = body.shape_params[0]
+            height = body.shape_params[1]
+            # Get capsule Y axis in world space
+            y_axis = Quaternion.rotate(body.orientation, np.array([0, 1, 0]))
+            half_height = height * 0.5
+            # Endpoints of capsule
+            p1 = body.position - y_axis * half_height
+            p2 = body.position + y_axis * half_height
+            # AABB encompasses both spherical caps
+            min_point = np.minimum(p1, p2) - radius
+            max_point = np.maximum(p1, p2) + radius
+            return AABB(min_point=min_point, max_point=max_point, body_index=-1)
+        elif body.shape_type == ShapeType.BOX:
+            # Transform box corners to world space
+            half_extents = body.shape_params
+            corners = []
+            for sx in [-1, 1]:
+                for sy in [-1, 1]:
+                    for sz in [-1, 1]:
+                        local_corner = half_extents * np.array([sx, sy, sz])
+                        world_corner = body.position + Quaternion.rotate(body.orientation, local_corner)
+                        corners.append(world_corner)
+            corners = np.array(corners)
+            return AABB(
+                min_point=np.min(corners, axis=0),
+                max_point=np.max(corners, axis=0),
+                body_index=-1
+            )
+        else:
+            raise ValueError(f"Unknown shape type: {body.shape_type}")
+    
     def _detect_and_resolve_collisions(self):
-        """Detect and resolve all collisions."""
+        """Detect and resolve all collisions using broadphase first."""
+        # Compute AABBs for all bodies
+        aabbs = []
+        for i, body in enumerate(self.bodies):
+            aabb = self._compute_aabb(body)
+            aabb.body_index = i
+            aabbs.append(aabb)
+        
+        # Broadphase: find potentially colliding pairs
+        potential_pairs = self.broadphase.detect_pairs(aabbs)
+        
+        # Narrowphase: check actual collisions for potential pairs
+        for i, j in potential_pairs:
+            self._process_collision_pair(self.bodies[i], self.bodies[j])
+    
+    def get_all_pairs_bruteforce(self) -> List[Tuple[int, int]]:
+        """Get all potentially colliding pairs using O(n^2) brute force (for testing)."""
+        pairs = []
+        aabbs = []
+        
+        # Compute AABBs
+        for i, body in enumerate(self.bodies):
+            aabb = self._compute_aabb(body)
+            aabb.body_index = i
+            aabbs.append(aabb)
+        
+        # Check all pairs
         for i in range(len(self.bodies)):
             for j in range(i + 1, len(self.bodies)):
-                self._process_collision_pair(self.bodies[i], self.bodies[j])
+                aabb_a = aabbs[i]
+                aabb_b = aabbs[j]
+                
+                # Check AABB overlap
+                if (aabb_a.min_point[0] <= aabb_b.max_point[0] and
+                    aabb_a.max_point[0] >= aabb_b.min_point[0] and
+                    aabb_a.min_point[1] <= aabb_b.max_point[1] and
+                    aabb_a.max_point[1] >= aabb_b.min_point[1] and
+                    aabb_a.min_point[2] <= aabb_b.max_point[2] and
+                    aabb_a.max_point[2] >= aabb_b.min_point[2]):
+                    pairs.append((i, j))
+        
+        return pairs
+    
+    def get_broadphase_pairs(self) -> List[Tuple[int, int]]:
+        """Get potentially colliding pairs from broadphase (for testing)."""
+        aabbs = []
+        for i, body in enumerate(self.bodies):
+            aabb = self._compute_aabb(body)
+            aabb.body_index = i
+            aabbs.append(aabb)
+        
+        return self.broadphase.detect_pairs(aabbs)
     
     def _process_collision_pair(self, body_a: Body, body_b: Body):
         """Process potential collision between two bodies."""
-        distance, normal = self._compute_sdf_distance(body_a, body_b)
-        self.collision_resolver.resolve(body_a, body_b, distance, normal, self.dt)
+        distance, normal, contact_point = self._compute_sdf_distance(body_a, body_b)
+        self.collision_resolver.resolve(body_a, body_b, distance, normal, contact_point, self.dt)
     
-    def _compute_sdf_distance(self, body_a: Body, body_b: Body) -> Tuple[float, np.ndarray]:
+    def _compute_sdf_distance(self, body_a: Body, body_b: Body) -> Tuple[float, np.ndarray, np.ndarray]:
         """Compute signed distance between two bodies."""
         # Handle shape ordering
         if body_a.shape_type > body_b.shape_type:
-            distance, normal = self._compute_sdf_distance(body_b, body_a)
-            return distance, -normal
+            distance, normal, contact_point = self._compute_sdf_distance(body_b, body_a)
+            return distance, -normal, contact_point
         
         # Get appropriate detector
         detector = self.detector_factory.get_detector(body_a.shape_type, body_b.shape_type)
-        return detector.compute_distance(body_a, body_b)
+        
+        # Check if detector returns 3 values (new style) or 2 (old style)
+        result = detector.compute_distance(body_a, body_b)
+        if len(result) == 3:
+            return result
+        else:
+            # Old style detector - estimate contact point
+            distance, normal = result
+            # Simple approximation: contact point on surface of body A
+            if body_a.shape_type == ShapeType.SPHERE:
+                contact_point = body_a.position + normal * body_a.shape_params[0]
+            else:
+                contact_point = body_a.position  # Fallback to center
+            return distance, normal, contact_point
     
     def get_state(self) -> np.ndarray:
         """Pack all bodies into a single array for serialization."""
