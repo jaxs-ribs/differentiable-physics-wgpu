@@ -53,6 +53,11 @@ fi
 VIDEO_SIZE=$(du -h preview.mp4 | cut -f1)
 echo -e "${GREEN}Video created: preview.mp4 (${VIDEO_SIZE})${NC}"
 
+# Save video to temp location first
+echo -e "\n${BLUE}Saving video to temporary location...${NC}"
+TEMP_VIDEO="/tmp/preview_video_$$.mp4"
+cp preview.mp4 "$TEMP_VIDEO"
+
 # Switch to preview branch
 echo -e "\n${BLUE}Switching to preview branch...${NC}"
 if git show-ref --verify --quiet refs/heads/preview; then
@@ -61,9 +66,13 @@ else
     git checkout --orphan preview
 fi
 
-# Clear all files
+# Clear all files from git tracking and working directory
 git rm -rf . 2>/dev/null || true
 git clean -fdx
+
+# Copy video back from temp location
+cp "$TEMP_VIDEO" preview.mp4
+rm -f "$TEMP_VIDEO"
 
 # Add and commit video
 git add preview.mp4
