@@ -12,11 +12,38 @@ impl WireframeGeometry {
     pub fn generate_vertices_from_bodies(bodies: &[Body]) -> Vec<f32> {
         let mut vertices = Vec::new();
         
+        static mut FIRST_GENERATION: bool = true;
+        
         for (index, body) in bodies.iter().enumerate() {
             let aabb = Self::calculate_aabb(body);
             if let Some((min, max)) = aabb {
                 let color = Self::get_body_color(body);
+                
+                unsafe {
+                    if FIRST_GENERATION && index == 0 {
+                        println!("First body AABB: min={:?}, max={:?}, color={:?}", min, max, color);
+                        println!("Body position: {:?}", body.position);
+                    }
+                }
+                
                 Self::add_aabb_lines(&mut vertices, &min, &max, &color);
+            }
+        }
+        
+        unsafe {
+            if FIRST_GENERATION && !vertices.is_empty() {
+                FIRST_GENERATION = false;
+                println!("Generated {} vertices, first vertex: {:?}", vertices.len(), &vertices[0..6]);
+                // Check if vertices are reasonable
+                let mut min_coords = [f32::MAX; 3];
+                let mut max_coords = [f32::MIN; 3];
+                for i in (0..vertices.len()).step_by(6) {
+                    for j in 0..3 {
+                        min_coords[j] = min_coords[j].min(vertices[i + j]);
+                        max_coords[j] = max_coords[j].max(vertices[i + j]);
+                    }
+                }
+                println!("Vertex bounds: min={:?}, max={:?}", min_coords, max_coords);
             }
         }
         

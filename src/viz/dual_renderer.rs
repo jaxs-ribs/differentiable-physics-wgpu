@@ -645,6 +645,7 @@ impl DualRenderer {
             unsafe {
                 if RENDER_COUNT < 2 {
                     println!("Drawing oracle scene with {} vertices", self.oracle_vertex_count);
+                    println!("Is capture: {}", is_capture);
                 }
             }
         }
@@ -665,7 +666,20 @@ impl DualRenderer {
     }
     
     fn update_uniform_buffer(&self, gpu: &GpuContext) {
-        let uniform_data = ViewProjectionUniform::new(self.camera.view_projection_matrix_transposed());
+        let matrix = self.camera.view_projection_matrix_transposed();
+        
+        static mut FIRST_UPDATE: bool = true;
+        unsafe {
+            if FIRST_UPDATE {
+                FIRST_UPDATE = false;
+                println!("Camera view-projection matrix:");
+                for row in &matrix {
+                    println!("  {:?}", row);
+                }
+            }
+        }
+        
+        let uniform_data = ViewProjectionUniform::new(matrix);
         gpu.queue.write_buffer(&self.view_projection_buffer, 0, bytemuck::cast_slice(&[uniform_data]));
     }
 }
