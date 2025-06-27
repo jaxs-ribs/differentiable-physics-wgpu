@@ -65,6 +65,10 @@ impl DualRenderer {
         let config = Self::create_surface_config(&surface, gpu, window_manager)?;
         surface.configure(&gpu.device, &config);
         
+        if enable_capture {
+            println!("Capture enabled: surface configured at {}x{}", config.width, config.height);
+        }
+        
         let camera = Camera::new(config.width as f32 / config.height as f32);
         let view_projection_buffer = Self::create_uniform_buffer(gpu, &camera);
         
@@ -184,21 +188,9 @@ impl DualRenderer {
     }
     
     pub fn update_scenes(&mut self, gpu_context: &GpuContext, oracle_bodies: Option<&[Body]>, gpu_bodies: Option<&[Body]>) {
-        // Determine colors based on mode
-        let (oracle_color, gpu_color) = match (oracle_bodies.is_some(), gpu_bodies.is_some()) {
-            (true, true) => {
-                // Diff mode: green/transparent vs red/opaque
-                (ColorUniform { color: [0.0, 1.0, 0.0, 0.5] }, ColorUniform { color: [1.0, 0.0, 0.0, 1.0] })
-            }
-            (true, false) | (false, true) => {
-                // Inspect mode: use vertex colors (from WireframeGeometry)
-                (ColorUniform { color: [1.0, 1.0, 1.0, 1.0] }, ColorUniform { color: [1.0, 1.0, 1.0, 1.0] })
-            }
-            (false, false) => {
-                // Default/Demo Mode: white
-                (ColorUniform { color: [1.0, 1.0, 1.0, 1.0] }, ColorUniform { color: [1.0, 1.0, 1.0, 1.0] })
-            }
-        };
+        // Since we're using vertex colors directly now, just set uniforms to white
+        let oracle_color = ColorUniform { color: [1.0, 1.0, 1.0, 1.0] };
+        let gpu_color = ColorUniform { color: [1.0, 1.0, 1.0, 1.0] };
         
         // Update colors
         gpu_context.queue.write_buffer(&self.oracle_color_buffer, 0, bytemuck::cast_slice(&[oracle_color]));
@@ -525,9 +517,17 @@ impl DualRenderer {
     }
     
     fn create_dual_shader(device: &wgpu::Device) -> wgpu::ShaderModule {
+        // Use test shader for debugging
+        let use_test_shader = true;
+        let shader_source = if use_test_shader {
+            include_str!("../shaders/dual_debug_test.wgsl")
+        } else {
+            include_str!("../shaders/dual_debug.wgsl")
+        };
+        
         device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Dual Renderer Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/dual_debug.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
         })
     }
     
@@ -563,7 +563,7 @@ impl DualRenderer {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
+                topology: wgpu::PrimitiveTopology::TriangleList, // Changed to triangles for better visibility
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: None,
@@ -628,9 +628,14 @@ impl DualRenderer {
         
         // Debug output
         static mut RENDER_COUNT: u32 = 0;
+        static mut CAPTURE_RENDER_COUNT: u32 = 0;
         unsafe {
-            if RENDER_COUNT < 5 {
-                println!("Render pass {} - Oracle vertices: {}, GPU vertices: {}", 
+            if is_capture && CAPTURE_RENDER_COUNT < 5 {
+                println!("CAPTURE render pass {} - Oracle vertices: {}, GPU vertices: {}", 
+                    CAPTURE_RENDER_COUNT, self.oracle_vertex_count, self.gpu_vertex_count);
+                CAPTURE_RENDER_COUNT += 1;
+            } else if !is_capture && RENDER_COUNT < 5 {
+                println!("Surface render pass {} - Oracle vertices: {}, GPU vertices: {}", 
                     RENDER_COUNT, self.oracle_vertex_count, self.gpu_vertex_count);
                 RENDER_COUNT += 1;
             }
@@ -649,6 +654,7 @@ impl DualRenderer {
                 }
             }
         }
+        
         
         // Draw GPU scene (red/opaque)
         if self.gpu_vertex_count > 0 {

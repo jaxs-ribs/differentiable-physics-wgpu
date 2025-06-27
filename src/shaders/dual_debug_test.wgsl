@@ -25,13 +25,23 @@ struct VertexOutput {
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.position = view_proj.matrix * vec4<f32>(input.position, 1.0);
+    
+    // DEBUG: Create a simple triangle that fills the screen
+    // Map vertex positions to NDC space directly for testing
+    if (input.position.x < -50.0) {
+        output.position = vec4<f32>(-1.0, -1.0, 0.5, 1.0);
+    } else if (input.position.x > 50.0) {
+        output.position = vec4<f32>(1.0, -1.0, 0.5, 1.0);
+    } else {
+        output.position = vec4<f32>(0.0, 1.0, 0.5, 1.0);
+    }
+    
     output.color = input.color;
     return output;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    // Use vertex color directly for better visibility
+    // Use bright colors for visibility
     return vec4<f32>(input.color, 1.0);
 }

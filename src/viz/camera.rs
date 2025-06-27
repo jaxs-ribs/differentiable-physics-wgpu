@@ -1,6 +1,6 @@
 use glam::{Mat4, Vec3};
 
-const DEFAULT_FOV_DEGREES: f32 = 45.0;
+const DEFAULT_FOV_DEGREES: f32 = 60.0;  // Wider FOV
 const NEAR_PLANE: f32 = 0.1;
 const FAR_PLANE: f32 = 1000.0;
 const UP_VECTOR: Vec3 = Vec3::Y;
@@ -18,9 +18,9 @@ impl Camera {
     pub fn new(aspect_ratio: f32) -> Self {
         let mut camera = Self {
             target: Vec3::new(0.0, 5.0, 0.0),
-            radius: 40.0,
+            radius: 30.0,  // Closer to the scene
             theta: -std::f32::consts::FRAC_PI_2, // Start looking along the Z axis
-            phi: std::f32::consts::FRAC_PI_3,   // Start looking from a 60 degree angle
+            phi: std::f32::consts::FRAC_PI_4,   // Start looking from a 45 degree angle
             aspect_ratio,
             view_projection_matrix: Mat4::IDENTITY,
         };

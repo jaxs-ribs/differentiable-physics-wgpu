@@ -100,7 +100,7 @@ rm -f "$TEMP_VIDEO"
 # Add and commit video
 echo -e "${BLUE}Committing video...${NC}"
 git add preview.mp4
-git commit -m "Update preview video"
+git commit -m "Update preview video" || echo -e "${YELLOW}No changes to commit${NC}"
 
 # Force push
 echo -e "\n${BLUE}Pushing to remote...${NC}"

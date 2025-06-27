@@ -139,10 +139,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if recording {
         println!("Initial window size: {:?}", window_manager.window().inner_size());
         // Set window to 800x600 for consistent video size
-        let _ = window_manager.window().request_inner_size(winit::dpi::LogicalSize::new(800, 600));
+        let _ = window_manager.window().request_inner_size(winit::dpi::PhysicalSize::new(800, 600));
         // Give the window system time to process the resize
-        std::thread::sleep(Duration::from_millis(200));
-        println!("Window size after resize: {:?}", window_manager.window().inner_size());
+        std::thread::sleep(Duration::from_millis(500)); // More time for resize
+        
+        // Force a resize if needed
+        let current_size = window_manager.window().inner_size();
+        println!("Window size after resize request: {:?}", current_size);
+        
+        // If the window didn't resize properly, we still need to continue
+        if current_size.width != 800 || current_size.height != 600 {
+            println!("Warning: Window resize to 800x600 failed, using {}x{}", current_size.width, current_size.height);
+        }
     }
     
     let gpu_context = pollster::block_on(GpuContext::new())?;
