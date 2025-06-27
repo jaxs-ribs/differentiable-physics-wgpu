@@ -10,9 +10,9 @@ use super::{
 const MAX_AABB_COUNT: usize = 1000;
 const VERTEX_BUFFER_SIZE: u64 = 12 * 2 * 6 * 4 * MAX_AABB_COUNT as u64;
 const CLEAR_COLOR: wgpu::Color = wgpu::Color {
-    r: 0.0,
-    g: 0.0,
-    b: 0.15,
+    r: 0.1,  // 25.5 in 8-bit
+    g: 0.2,  // 51 in 8-bit  
+    b: 0.3,  // 76.5 in 8-bit
     a: 1.0,
 };
 
@@ -115,6 +115,11 @@ impl DualRenderer {
             let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
             let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
             
+            // Use the same format as the surface for now
+            let capture_format = config.format;
+            
+            println!("Creating capture texture with format: {:?}, size: {}x{}", capture_format, config.width, config.height);
+            
             let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Capture Texture"),
                 size: wgpu::Extent3d {
@@ -125,7 +130,7 @@ impl DualRenderer {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: config.format,
+                format: capture_format,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
@@ -247,12 +252,13 @@ impl DualRenderer {
         // Always render to surface for visual feedback
         self.encode_dual_render_pass(&mut encoder, &surface_view);
         
-        gpu.queue.submit(Some(encoder.finish()));
+        let submission_index = gpu.queue.submit(Some(encoder.finish()));
         
         // Wait for GPU to finish rendering before presenting
         // This is crucial for capture to work properly
         if self.capture_texture.is_some() {
-            gpu.device.poll(wgpu::MaintainBase::Wait);
+            // Use the submission index to wait for this specific submission
+            gpu.device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(submission_index));
         }
         
         output.present();
@@ -294,10 +300,10 @@ impl DualRenderer {
             },
         );
         
-        gpu.queue.submit(Some(encoder.finish()));
+        let copy_submission = gpu.queue.submit(Some(encoder.finish()));
         
         // Wait for the copy to complete
-        gpu.device.poll(wgpu::MaintainBase::Wait);
+        gpu.device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(copy_submission));
         
         // Map buffer and read data
         let buffer_slice = staging_buffer.slice(..);
@@ -351,9 +357,10 @@ impl DualRenderer {
                 FIRST_CAPTURE = false;
                 println!("Capture debug - first pixel BGRA: {:?}", first_pixel);
                 println!("Capture debug - all pixels same: {}", all_same);
-                println!("Capture debug - expected clear color BGRA: [38, 0, 0, 255] (dark blue)");
+                println!("Capture debug - expected clear color BGRA: [77, 51, 26, 255]");
                 println!("Capture debug - frame data size: {} bytes", frame_data.len());
                 println!("Capture debug - expected size: {} bytes", self.config.width * self.config.height * 4);
+                println!("Capture debug - capture texture format: {:?}", self.config.format);
                 
                 // Check a few more pixels
                 if frame_data.len() >= 16 {
