@@ -10,34 +10,33 @@ DT = 0.016
 # --- Scene Creation ---
 engine = PhysicsEngine(dt=DT, gravity=np.array([0, -9.81, 0]))
 
-# Add ground
+# Add ground as a large box
 ground = Body(
-    position=np.array([0., -5., 0.]),
+    position=np.array([0., -2., 0.]),
     velocity=np.array([0., 0., 0.]),
     orientation=np.array([1., 0., 0., 0.]),
     angular_vel=np.zeros(3),
     mass=1e8,  # Static
     inertia=np.eye(3) * 1e8,
-    shape_type=ShapeType.SPHERE,
-    shape_params=np.array([5., 0., 0.])
+    shape_type=ShapeType.BOX,
+    shape_params=np.array([10., 0.5, 10.])  # Large flat box
 )
 engine.add_body(ground)
 
 print("Adding boxes...")
 # Add some boxes to fall
-for i in range(4):
-    for j in range(4):
-        body = Body(
-            position=np.array([i*3.0 - 3.0, 5.0 + j*3.0, 0.]),
-            velocity=np.array([0., 0., 0.]),
-            orientation=np.array([1., 0., 0., 0.]),
-            angular_vel=np.array([(np.random.rand() - 0.5) * 5.0, (np.random.rand() - 0.5) * 5.0, (np.random.rand() - 0.5) * 5.0]),
-            mass=1.0,
-            inertia=np.eye(3) * (2.0/5.0) * 1.0 * (1.0**2), # Solid sphere inertia
-            shape_type=ShapeType.BOX,
-            shape_params=np.array([1.0, 1.0, 1.0]) # Half-extents
-        )
-        engine.add_body(body)
+for i in range(3):
+    body = Body(
+        position=np.array([i*3.0 - 3.0, 5.0, 0.]),
+        velocity=np.array([0., 0., 0.]),
+        orientation=np.array([1., 0., 0., 0.]),
+        angular_vel=np.array([0., 0., 0.]),
+        mass=1.0,
+        inertia=np.eye(3) * (1.0/6.0) * 1.0 * 4.0, # Box inertia
+        shape_type=ShapeType.BOX,
+        shape_params=np.array([1.0, 1.0, 1.0]) # Half-extents
+    )
+    engine.add_body(body)
 
 # --- Simulation and Data Collection ---
 all_states = []

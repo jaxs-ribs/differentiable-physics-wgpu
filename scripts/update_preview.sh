@@ -9,7 +9,10 @@ NC='\033[0m' # No Color
 
 echo -e "${BLUE}=== Physics Engine Preview Video Generator ===${NC}\n"
 
-# Handle uncommitted changes
+# Initialize stash flag
+STASHED=false
+
+# Handle uncommitted changes and untracked files
 if [[ -n $(git status --porcelain) ]]; then
     echo -e "${RED}Warning: Working directory has uncommitted changes${NC}"
     echo "The following files have changes:"
@@ -19,6 +22,8 @@ if [[ -n $(git status --porcelain) ]]; then
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${BLUE}Stashing changes...${NC}"
+        # Add untracked files to stash as well
+        git add -A
         git stash push -m "preview-generation-stash-$(date +%s)"
         STASHED=true
     else

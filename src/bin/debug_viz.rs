@@ -110,12 +110,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut gpu_trace: Option<Vec<Vec<Body>>> = None;
     
     if let Some(path) = args.oracle {
-        println!("👁️  Loading oracle trace...");
-        oracle_trace = Some(load_body_trace_from_npy(&path)?);
+        println!("👁️  Loading oracle trace from: {}", path.display());
+        let trace = load_body_trace_from_npy(&path)?;
+        println!("   Loaded {} frames with {} bodies each", trace.len(), trace.get(0).map_or(0, |f| f.len()));
+        oracle_trace = Some(trace);
     }
     if let Some(path) = args.gpu {
-        println!("👁️  Loading GPU trace...");
-        gpu_trace = Some(load_body_trace_from_npy(&path)?);
+        println!("👁️  Loading GPU trace from: {}", path.display());
+        let trace = load_body_trace_from_npy(&path)?;
+        println!("   Loaded {} frames with {} bodies each", trace.len(), trace.get(0).map_or(0, |f| f.len()));
+        gpu_trace = Some(trace);
     }
     
     let num_frames = oracle_trace.as_ref().map_or(0, |t| t.len()).max(gpu_trace.as_ref().map_or(0, |t| t.len()));
@@ -180,9 +184,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if recording {
                         match renderer.render(&gpu_context) {
                             Ok(_) => {
-                                if captured_frames_clone.lock().unwrap().len() < max_frames {
+                                let current_count = captured_frames_clone.lock().unwrap().len();
+                                if current_count < max_frames {
                                     if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
                                         captured_frames_clone.lock().unwrap().push(frame_data);
+                                        if current_count % 30 == 0 {
+                                            println!("Captured frame {} of {}", current_count + 1, max_frames);
+                                        }
                                     }
                                 }
                             }

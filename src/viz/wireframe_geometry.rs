@@ -15,16 +15,11 @@ impl WireframeGeometry {
         for (index, body) in bodies.iter().enumerate() {
             let aabb = Self::calculate_aabb(body);
             if let Some((min, max)) = aabb {
-                if index < 3 {
-                    Self::debug_print_body_info(index, body, &min, &max);
-                }
-                
                 let color = Self::get_body_color(body);
                 Self::add_aabb_lines(&mut vertices, &min, &max, &color);
             }
         }
         
-        Self::debug_print_vertex_count(&vertices);
         vertices
     }
     
@@ -110,24 +105,4 @@ impl WireframeGeometry {
         vertices.extend_from_slice(&[end[0], end[1], end[2], color[0], color[1], color[2]]);
     }
     
-    fn debug_print_body_info(index: usize, body: &Body, min: &[f32; 3], max: &[f32; 3]) {
-        println!(
-            "  Body {}: pos=({:.2}, {:.2}, {:.2}), AABB: min=({:.2}, {:.2}, {:.2}) max=({:.2}, {:.2}, {:.2})",
-            index, body.position[0], body.position[1], body.position[2],
-            min[0], min[1], min[2], max[0], max[1], max[2]
-        );
-    }
-    
-    fn debug_print_vertex_count(vertices: &[f32]) {
-        let vertex_count = vertices.len() / FLOATS_PER_VERTEX;
-        let line_count = vertex_count / VERTICES_PER_LINE;
-        println!(
-            "Generated {} vertices ({} floats) for {} lines",
-            vertex_count, vertices.len(), line_count
-        );
-        
-        if vertices.is_empty() {
-            println!("WARNING: No vertices generated!");
-        }
-    }
 }

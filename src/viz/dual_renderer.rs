@@ -176,8 +176,8 @@ impl DualRenderer {
                 (ColorUniform { color: [0.0, 1.0, 0.0, 0.5] }, ColorUniform { color: [1.0, 0.0, 0.0, 1.0] })
             }
             (true, false) | (false, true) => {
-                // Inspect mode: black/opaque for whichever is present
-                (ColorUniform { color: [0.0, 0.0, 0.0, 1.0] }, ColorUniform { color: [0.0, 0.0, 0.0, 1.0] })
+                // Inspect mode: use vertex colors (from WireframeGeometry)
+                (ColorUniform { color: [1.0, 1.0, 1.0, 1.0] }, ColorUniform { color: [1.0, 1.0, 1.0, 1.0] })
             }
             (false, false) => {
                 // Default/Demo Mode: white
@@ -223,13 +223,13 @@ impl DualRenderer {
             label: Some("Dual Render Encoder"),
         });
         
-        // Render to capture texture if available
+        // Always render to surface for visual feedback
+        self.encode_dual_render_pass(&mut encoder, &surface_view);
+        
+        // If capturing, also render to capture texture
         if let Some(capture_view) = &self.capture_view {
             self.encode_dual_render_pass(&mut encoder, capture_view);
         }
-        
-        // Always render to surface
-        self.encode_dual_render_pass(&mut encoder, &surface_view);
         
         gpu.queue.submit(Some(encoder.finish()));
         
@@ -246,6 +246,9 @@ impl DualRenderer {
     pub fn capture_frame(&self, gpu: &GpuContext) -> Option<Vec<u8>> {
         let capture_texture = self.capture_texture.as_ref()?;
         let staging_buffer = self.staging_buffer.as_ref()?;
+        
+        // The render has already been submitted and we waited for it in render()
+        // Now we just need to copy the texture to the staging buffer
         
         // Create encoder to copy texture to buffer
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -275,6 +278,9 @@ impl DualRenderer {
         );
         
         gpu.queue.submit(Some(encoder.finish()));
+        
+        // Wait for the copy to complete
+        gpu.device.poll(wgpu::MaintainBase::Wait);
         
         // Map buffer and read data
         let buffer_slice = staging_buffer.slice(..);
