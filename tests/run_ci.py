@@ -69,9 +69,21 @@ def run_command(cmd, description, capture_output=False):
     print(f"Running: {description}")
     print(f"Command: {cmd}")
     
+    # Set up environment with proper PYTHONPATH
+    env = os.environ.copy()
+    physics_core_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tinygrad_path = os.path.join(physics_core_path, "external", "tinygrad")
+    
+    # Add to PYTHONPATH
+    python_path = f"{physics_core_path}:{tinygrad_path}"
+    if 'PYTHONPATH' in env:
+        env['PYTHONPATH'] = f"{python_path}:{env['PYTHONPATH']}"
+    else:
+        env['PYTHONPATH'] = python_path
+    
     try:
         if capture_output:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, env=env)
             if result.returncode == 0:
                 print_success(description)
                 return True, result.stdout
@@ -81,7 +93,7 @@ def run_command(cmd, description, capture_output=False):
                     print(f"Error: {result.stderr}")
                 return False, result.stderr
         else:
-            result = subprocess.run(cmd, shell=True)
+            result = subprocess.run(cmd, shell=True, env=env)
             if result.returncode == 0:
                 print_success(description)
                 return True, None
