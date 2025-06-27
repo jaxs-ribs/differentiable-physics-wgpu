@@ -73,7 +73,53 @@ The Python Oracle has been successfully implemented with all core components:
 The Python Oracle is complete and validated. The codebase is ready to proceed with:
 - **Phase 2:** Port to monolithic WGSL kernel for GPU execution
 - **Phase 3:** Integration via Ops.CUSTOM
-- **Phase 4:** Backward pass implementation 
+- **Phase 4:** Backward pass implementation
+
+## V. Custom Op Implementation (Proof of Concept)
+
+### Phase 3 Exploration: COMPLETE ✓
+
+A proof-of-concept implementation of TinyGrad custom ops has been created to demonstrate the integration approach:
+
+1. **C Physics Library** (`physics_lib.c`)
+   - Implemented core physics operations in C for high performance
+   - `physics_step()` - Complete physics simulation step
+   - `physics_integrate()` - Position/velocity integration
+   - `physics_collisions()` - Collision detection and response
+   - Compiled as shared library (.so/.dylib)
+
+2. **Pattern Matching Integration** (`physics_patterns.py`)
+   - Created PatternMatcher to recognize physics computation patterns
+   - Transforms high-level operations to CUSTOM ops
+   - Provides framework for operation fusion and optimization
+
+3. **Device Extension Mechanism** (`physics_extension.py`)
+   - `PhysicsEnabledRenderer` - Wraps existing renderers without modifying TinyGrad
+   - Works with any TinyGrad device (CPU, GPU, etc.)
+   - Context manager for temporary physics enablement
+   - No TinyGrad core modifications required
+
+4. **High-Level API** (`physics_tensor_ops.py`)
+   - `PhysicsTensor` class extends Tensor with physics methods
+   - Demonstrates integration with TinyGrad's tensor operations
+   - Performance benchmarking shows efficient C function calls
+
+### Key Insights from Custom Op Implementation:
+
+1. **Non-invasive Integration**: Successfully demonstrated extending TinyGrad without modifying core code
+2. **Device Agnostic**: Physics ops work with existing devices rather than requiring custom device
+3. **Pattern Matching**: TinyGrad's PatternMatcher provides powerful optimization opportunities
+4. **CUSTOM Op Format**: Format strings enable clean C function integration
+
+### Implementation Status:
+- ✓ C library compiles and passes tests
+- ✓ Pattern matcher framework established
+- ✓ Device extension mechanism working
+- ✓ Basic demonstrations functional
+- ⚠️ Full UOp graph integration pending
+- ⚠️ GPU kernels not yet implemented
+
+This proof-of-concept validates the approach for Phase 3 and provides a foundation for full integration. 
 
 # tinygrad agents
 
