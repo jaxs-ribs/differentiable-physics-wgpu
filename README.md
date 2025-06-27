@@ -5,11 +5,15 @@ A pure TinyGrad differentiable rigid-body physics engine with JIT compilation su
 ## Installation
 
 ```bash
-# Install dependencies
-pip install tinygrad numpy
-
-# Clone and navigate to the project
+# Clone with submodules
+git clone --recursive [repository-url]
 cd physics_core/
+
+# Or if already cloned, initialize submodules
+git submodule update --init --recursive
+
+# Install dependencies
+pip install numpy  # TinyGrad is included as a submodule
 ```
 
 ## Quick Start

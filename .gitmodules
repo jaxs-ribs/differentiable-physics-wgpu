@@ -1,6 +1,6 @@
-[submodule "tinygrad"]
-	path = tinygrad
-	url = https://github.com/jaxs-ribs/tinygrad.git
-[submodule "tinygrad-notes"]
-	path = tinygrad-notes
-	url = https://github.com/mesozoic-egg/tinygrad-notes.git
+[submodule "external/tinygrad"]
+	path = external/tinygrad
+	url = https://github.com/tinygrad/tinygrad
+[submodule "external/tinygrad-notes"]
+	path = external/tinygrad-notes
+	url = https://github.com/mesozoic-egg/tinygrad-notes
