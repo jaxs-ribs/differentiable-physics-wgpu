@@ -4,16 +4,18 @@ This comprehensive test suite ensures the robustness, correctness, and performan
 
 ## Overview
 
-The test suite is structured into three main categories:
+The test suite is structured into four main categories:
 
 - **Unit Tests**: Test individual components in isolation
 - **Integration Tests**: Test the full physics pipeline and emergent behaviors
 - **Benchmarks**: Measure performance to prevent regressions
+- **Debugging Tests**: Specialized diagnostic tools (not part of CI)
 
 ## Directory Structure
 
 ```
 tests/
+├── run_ci.py                # Main CI test runner
 ├── conftest.py              # Shared pytest fixtures
 ├── unit/
 │   └── physics/
@@ -23,9 +25,31 @@ tests/
 │   ├── test_energy_conservation.py  # Physical invariants
 │   ├── test_simulation_stability.py  # Numerical stability
 │   └── test_fuzzing_stability.py     # Property-based fuzzing
-└── benchmarks/
-    └── test_physics_step_performance.py  # Performance metrics
+├── benchmarks/
+│   └── test_physics_step_performance.py  # Performance metrics
+└── debugging/               # Diagnostic tools (see debugging/README.md)
+    ├── test_position_corruption.py
+    ├── find_nan_source.py
+    └── ... (specialized debug tests)
 ```
+
+## Quick Start - CI Test Suite
+
+The easiest way to run all tests is using the CI script:
+
+```bash
+# From physics_core directory
+python3 tests/run_ci.py
+```
+
+This runs 7 comprehensive tests:
+1. Import Tests - Verify all modules can be imported
+2. Basic Simulation - Test sphere falling under gravity  
+3. JIT Compilation - Verify JIT compilation works
+4. NumPy-Free Core - Ensure core modules don't import NumPy
+5. Main Script - Test the main.py entry point
+6. Collision Detection - Test collision response
+7. Performance - Basic performance benchmarks
 
 ## Running the Tests
 

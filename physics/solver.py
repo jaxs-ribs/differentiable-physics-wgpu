@@ -31,7 +31,16 @@ def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Te
   n_bodies = bodies.shape[0]
   n_contacts = pair_indices.shape[0]
   
-  # Handle empty case with masking instead of early return
+  # For JIT compatibility with empty contacts, we need to ensure indices are valid
+  # When n_contacts is 0, create dummy indices that won't affect the result
+  if n_contacts == 0:
+    # Create dummy data that will result in zero changes
+    pair_indices = Tensor.zeros((1, 2), dtype=dtypes.int32)
+    contact_normals = Tensor.zeros((1, 3))
+    contact_depths = Tensor.zeros((1,))
+    contact_points = Tensor.zeros((1, 3))
+    contact_mask = Tensor.zeros((1,))
+    n_contacts = 1
   
   # Gather body data for all contacts using pure tensor operations
   indices_a = pair_indices[:, 0]

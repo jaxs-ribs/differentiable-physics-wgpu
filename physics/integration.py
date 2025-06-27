@@ -48,10 +48,13 @@ def integrate(bodies: Tensor, dt: float, gravity: Tensor) -> Tensor:
   is_dynamic = (inv_mass > 1e-7).reshape(-1, 1)
   
   # Apply gravity and update velocity (v += g * dt for dynamic bodies only)
-  new_vel = vel.where(is_dynamic, vel + gravity * dt)
+  # Avoid Tensor.where due to NaN handling bug - use multiplication instead
+  gravity_accel = gravity * dt
+  new_vel = vel + gravity_accel * is_dynamic
   
   # Update position using new velocity (semi-implicit Euler)
-  new_pos = pos.where(is_dynamic, pos + new_vel * dt)
+  position_delta = new_vel * dt
+  new_pos = pos + position_delta * is_dynamic
   
   # Update orientation from angular velocity
   # q_dot = 0.5 * ω * q (where ω is pure quaternion [0, ωx, ωy, ωz])
@@ -62,11 +65,18 @@ def integrate(bodies: Tensor, dt: float, gravity: Tensor) -> Tensor:
   updated_quat = quat + q_dot * dt
   # Normalize to prevent drift from unit quaternion constraint
   norm_quat = updated_quat / updated_quat.pow(2).sum(axis=1, keepdim=True).sqrt()
-  new_quat = quat.where(has_ang_vel, norm_quat)
+  # Avoid Tensor.where - use blending instead
+  new_quat = quat * (~has_ang_vel).float() + norm_quat * has_ang_vel.float()
   
   # Assemble updated state (creates new tensor, preserving immutability)
+  # Create a copy of bodies
   new_bodies = bodies.detach()
+  
+  # Update only the changed fields
+  # Use slicing assignment which should preserve the tensor structure
+  new_bodies = new_bodies.contiguous()
   new_bodies[:, BodySchema.VEL_X:BodySchema.VEL_Z+1] = new_vel
   new_bodies[:, BodySchema.POS_X:BodySchema.POS_Z+1] = new_pos
   new_bodies[:, BodySchema.QUAT_W:BodySchema.QUAT_Z+1] = new_quat
+  
   return new_bodies

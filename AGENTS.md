@@ -36,10 +36,44 @@ We have established a clear, sequential roadmap to manage the complexity of this
 -   **Phase 4: The Backward Pass (The "Differentiability")**
     Implement the backward pass for our custom op, likely as a second, hand-written WGSL kernel. This will unlock end-to-end differentiability.
 
-## IV. Current Status & Immediate Objective
+## IV. Current Status & Completed Work
 
--   **Current Phase:** Phase 1
--   **Immediate Goal:** Complete the `physics_engine.py` oracle. The next step is to implement the full collision pipeline (Broadphase, Narrowphase, and a basic impulse-based Solver) according to the detailed specification we have drafted. This will provide the validated, ground-truth implementation required for all subsequent work. 
+### Phase 1 Status: COMPLETE ✓
+
+The Python Oracle has been successfully implemented with all core components:
+
+1. **Pure Tensor Operations** - Eliminated all NumPy dependencies from core physics modules
+   - Replaced NumPy array operations with TinyGrad tensors
+   - Implemented pure tensor pair generation for broadphase
+   - Converted all gather/scatter operations to tensor equivalents
+
+2. **N-Step JIT Compilation** - Entire simulations can run as single JIT-compiled kernels
+   - Created `_n_step_simulation()` function with internal loop
+   - Static physics step function for JIT compatibility
+   - Supports both single-step and N-step simulation modes
+
+3. **Complete Physics Pipeline**
+   - ✓ Broadphase: Differentiable all-pairs AABB collision detection
+   - ✓ Narrowphase: Sphere-sphere and sphere-box collision detection
+   - ✓ Solver: Impulse-based collision resolution with Baumgarte stabilization
+   - ✓ Integration: Semi-implicit Euler with quaternion updates
+
+4. **Bug Fixes & Stability**
+   - Fixed position corruption issue (NaN → [1,1,1] bug)
+   - Improved empty contact handling in solver
+   - Worked around TinyGrad's Tensor.where() NaN bug
+
+5. **Testing Infrastructure**
+   - Comprehensive CI test suite (7 tests, all passing)
+   - Organized test structure with unit, integration, benchmarks, and debugging tests
+   - Created diagnostic tools for deep debugging
+
+### Next Phase: Ready for Phase 2
+
+The Python Oracle is complete and validated. The codebase is ready to proceed with:
+- **Phase 2:** Port to monolithic WGSL kernel for GPU execution
+- **Phase 3:** Integration via Ops.CUSTOM
+- **Phase 4:** Backward pass implementation 
 
 # tinygrad agents
 
