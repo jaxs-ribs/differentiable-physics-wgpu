@@ -1,0 +1,25 @@
+[package]
+name = "physics_renderer"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "renderer"
+path = "src/main.rs"
+
+[dependencies]
+wgpu = "0.19"
+winit = "0.29"
+bytemuck = { version = "1.13", features = ["derive"] }
+pollster = "0.3"
+cgmath = "0.18"
+env_logger = "0.10"
+ndarray = "0.15"
+ndarray-npy = "0.8"
+clap = { version = "4.0", features = ["derive"] }
+anyhow = "1.0"
+futures = "0.3"
+log = "0.4"
+
+[dev-dependencies]
+approx = "0.5"

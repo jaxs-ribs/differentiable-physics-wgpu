@@ -49,6 +49,13 @@ physics_core/
 │   ├── math_utils.py        # Quaternion and matrix operations
 │   ├── types.py             # Body schema and shape types
 │   └── main.py              # Entry point for simulations
+├── renderer/                # Comparative replay renderer (Rust)
+│   ├── README.md           # Renderer documentation
+│   ├── Cargo.toml          # Rust project configuration
+│   └── src/                # Renderer source code
+│       ├── body.rs         # 108-byte body struct
+│       ├── loader.rs       # .npy trajectory loader
+│       └── main.rs         # Renderer entry point
 ├── custom_ops/              # Custom C operations for TinyGrad
 │   ├── README.md           # Custom ops documentation
 │   ├── src/                # C source code
@@ -246,6 +253,38 @@ world = world.integrate(dt=0.016)
 
 See `custom_ops/README.md` for detailed documentation.
 
+## Visualization & Analysis
+
+### Comparative Replay Renderer
+
+The `renderer/` directory contains a high-performance Rust application for visualizing and comparing simulation runs:
+
+```bash
+# Build the renderer
+cd renderer
+cargo build --release
+
+# Single simulation visualization
+cargo run --bin renderer -- --primary ../artifacts/simulation.npy
+
+# Compare two simulation runs (e.g., CPU vs GPU)
+cargo run --bin renderer -- \
+  --primary ../artifacts/cpu_run.npy \
+  --secondary ../artifacts/gpu_run.npy \
+  --mode benchmark
+
+# Correctness mode - verify numerical parity
+cargo run --bin renderer -- -p run1.npy -s run2.npy --mode correctness
+```
+
+**Features:**
+- Ghost rendering: Secondary runs appear as semi-transparent overlays
+- Dual modes: Correctness (frame-sync) and Benchmark (performance comparison)
+- Direct .npy file loading with validation
+- Clear visual feedback for performance differences
+
+See `renderer/README.md` for detailed usage instructions.
+
 ## Status
 
 **Phase 1 Complete** ✓ - Python oracle fully implemented and tested
@@ -277,3 +316,4 @@ Ready for:
 - [`tests/README.md`](tests/README.md) - Test suite documentation
 - [`physics/README.md`](physics/README.md) - Physics module details
 - [`custom_ops/README.md`](custom_ops/README.md) - Custom operations guide
+- [`renderer/README.md`](renderer/README.md) - Comparative replay renderer guide
