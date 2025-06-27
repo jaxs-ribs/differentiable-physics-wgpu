@@ -12,7 +12,13 @@ echo -e "${BLUE}=== Physics Engine Preview Video Generator ===${NC}\n"
 # Initialize stash flag
 STASHED=false
 
-# Handle uncommitted changes and untracked files
+# Clean up files we know will be generated
+echo -e "${BLUE}Cleaning up generated files...${NC}"
+rm -f preview.mp4
+rm -f tests/oracle_dump.npy
+rm -rf tests/__pycache__
+
+# Handle remaining uncommitted changes
 if [[ -n $(git status --porcelain) ]]; then
     echo -e "${RED}Warning: Working directory has uncommitted changes${NC}"
     echo "The following files have changes:"
@@ -22,9 +28,7 @@ if [[ -n $(git status --porcelain) ]]; then
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${BLUE}Stashing changes...${NC}"
-        # Add untracked files to stash as well
-        git add -A
-        git stash push -m "preview-generation-stash-$(date +%s)"
+        git stash push -m "preview-generation-stash-$(date +%s)" --include-untracked
         STASHED=true
     else
         echo -e "${RED}Aborting. Please commit or stash your changes manually.${NC}"
@@ -102,7 +106,7 @@ git push -f origin preview
 echo -e "\n${BLUE}Returning to $CURRENT_BRANCH...${NC}"
 git checkout $CURRENT_BRANCH
 
-# Clean up
+# Clean up local video file
 rm -f preview.mp4
 
 # Restore stashed changes if any
