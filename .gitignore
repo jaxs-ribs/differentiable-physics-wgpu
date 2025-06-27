@@ -1,2 +1,14 @@
 /target
 /tests/.hypothesis
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Test outputs
+tests/oracle_dump.npy
+tests/*.npy
+
+# Video files
+preview.mp4
+*.mp4
