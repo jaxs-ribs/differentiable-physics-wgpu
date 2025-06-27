@@ -21,7 +21,8 @@ tests/
 │       └── test_math_utils.py    # Quaternion and matrix operations
 ├── integration/
 │   ├── test_energy_conservation.py  # Physical invariants
-│   └── test_simulation_stability.py  # Numerical stability
+│   ├── test_simulation_stability.py  # Numerical stability
+│   └── test_fuzzing_stability.py     # Property-based fuzzing
 └── benchmarks/
     └── test_physics_step_performance.py  # Performance metrics
 ```
@@ -31,7 +32,7 @@ tests/
 ### Install Dependencies
 
 ```bash
-pip install pytest pytest-benchmark numpy tinygrad
+pip install pytest pytest-benchmark numpy tinygrad hypothesis
 ```
 
 ### Run All Tests
@@ -99,6 +100,14 @@ Ensures the simulation remains stable under various conditions:
 - Random chaotic scenes don't diverge
 - Zero timestep handling
 
+#### `test_fuzzing_stability.py`
+Property-based testing that generates random physics scenes:
+- Uses hypothesis library to generate hundreds of random configurations
+- Verifies stability and physical laws hold across all scenarios
+- Tests dense scenes with many bodies in close proximity
+- Validates different timestep configurations
+- Acts as an automated "chaos monkey" for finding edge cases
+
 ### Benchmarks
 
 #### `test_physics_step_performance.py`
@@ -122,6 +131,15 @@ pytest tests/integration/test_simulation_stability.py::TestSimulationStability::
 ### Performance Benchmark
 ```bash
 pytest tests/benchmarks/test_physics_step_performance.py::TestPhysicsPerformance::test_physics_step_performance_medium -v -s
+```
+
+### Property-Based Fuzzing
+```bash
+# Run fuzzing tests with more examples
+pytest tests/integration/test_fuzzing_stability.py::TestFuzzingStability::test_fuzz_simulation_stability --hypothesis-show-statistics
+
+# Run with specific seed for reproducibility
+pytest tests/integration/test_fuzzing_stability.py --hypothesis-seed=42
 ```
 
 ## Writing New Tests
@@ -181,4 +199,24 @@ pytest tests/benchmarks/ -m benchmark --benchmark-json=benchmark_results.json
 
 # Compare with previous results
 pytest tests/benchmarks/ -m benchmark --benchmark-compare=benchmark_results.json
+```
+
+## Property-Based Testing with Hypothesis
+
+The fuzzing tests use hypothesis to automatically generate test cases:
+
+```python
+# Example: Generate random physics bodies
+@given(scene_strategy())
+def test_random_scene(bodies):
+    # Test will run with hundreds of different random scenes
+    engine = TensorPhysicsEngine(bodies)
+    # ... test invariants ...
+```
+
+This approach helps find edge cases that manual testing might miss. The fuzzing tests act as a "chaos monkey" that continuously stress-tests the engine with unexpected configurations.
+
+To see what hypothesis is generating:
+```bash
+pytest tests/integration/test_fuzzing_stability.py --hypothesis-verbosity=debug
 ```
