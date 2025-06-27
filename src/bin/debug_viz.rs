@@ -134,15 +134,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let event_loop = EventLoop::new()?;
     let window_manager = WindowManager::new(&event_loop)?;
+    
+    // For recording, set window size before creating renderer
+    if recording {
+        // Set window to 800x600 for consistent video size
+        let _ = window_manager.window().request_inner_size(winit::dpi::LogicalSize::new(800, 600));
+        // Give the window system time to process the resize
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    
     let gpu_context = pollster::block_on(GpuContext::new())?;
     let mut renderer = pollster::block_on(DualRenderer::new_with_capture(&window_manager, &gpu_context, recording))?;
     
     let output_path = args.record.clone();
-    // For recording, create a fixed-size window
-    if recording {
-        // Resize window to 800x600 for consistent video size
-        let _ = window_manager.window().request_inner_size(winit::dpi::LogicalSize::new(800, 600));
-    }
     
     let captured_frames = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
     
@@ -187,7 +191,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let current_count = captured_frames_clone.lock().unwrap().len();
                                 if current_count < max_frames {
                                     if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
-                                        captured_frames_clone.lock().unwrap().push(frame_data);
                                         if current_count % 30 == 0 {
                                             println!("Captured frame {} of {}", current_count + 1, max_frames);
                                             // Debug: print first few bytes to see if it's all grey
@@ -195,6 +198,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 println!("First 16 bytes: {:?}", &frame_data[..16.min(frame_data.len())]);
                                             }
                                         }
+                                        captured_frames_clone.lock().unwrap().push(frame_data);
                                     }
                                 }
                             }

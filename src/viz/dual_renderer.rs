@@ -189,12 +189,21 @@ impl DualRenderer {
         gpu_context.queue.write_buffer(&self.oracle_color_buffer, 0, bytemuck::cast_slice(&[oracle_color]));
         gpu_context.queue.write_buffer(&self.gpu_color_buffer, 0, bytemuck::cast_slice(&[gpu_color]));
         
+        // Debug output for first update
+        static mut FIRST_UPDATE: bool = true;
+        
         // Update oracle scene
         if let Some(bodies) = oracle_bodies {
             let vertices = WireframeGeometry::generate_vertices_from_bodies(bodies);
             self.oracle_vertex_count = vertices.len() as u32;
             if !vertices.is_empty() {
                 gpu_context.queue.write_buffer(&self.oracle_line_buffer, 0, bytemuck::cast_slice(&vertices));
+                
+                unsafe {
+                    if FIRST_UPDATE {
+                        println!("Oracle scene: {} bodies, {} vertices", bodies.len(), self.oracle_vertex_count);
+                    }
+                }
             }
         } else {
             self.oracle_vertex_count = 0;
@@ -206,6 +215,13 @@ impl DualRenderer {
             self.gpu_vertex_count = vertices.len() as u32;
             if !vertices.is_empty() {
                 gpu_context.queue.write_buffer(&self.gpu_line_buffer, 0, bytemuck::cast_slice(&vertices));
+                
+                unsafe {
+                    if FIRST_UPDATE {
+                        println!("GPU scene: {} bodies, {} vertices", bodies.len(), self.gpu_vertex_count);
+                        FIRST_UPDATE = false;
+                    }
+                }
             }
         } else {
             self.gpu_vertex_count = 0;
@@ -232,6 +248,13 @@ impl DualRenderer {
         self.encode_dual_render_pass(&mut encoder, &surface_view);
         
         gpu.queue.submit(Some(encoder.finish()));
+        
+        // Wait for GPU to finish rendering before presenting
+        // This is crucial for capture to work properly
+        if self.capture_texture.is_some() {
+            gpu.device.poll(wgpu::MaintainBase::Wait);
+        }
+        
         output.present();
         
         Ok(())
@@ -294,10 +317,55 @@ impl DualRenderer {
         let mut frame_data = Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
         let unpadded_bytes_per_row = self.config.width * 4;
         
+        // Debug: Check if we're getting the expected clear color
+        let mut all_same = true;
+        let mut first_pixel = [0u8; 4];
+        
         for y in 0..self.config.height {
             let row_start = (y * self.bytes_per_row) as usize;
             let row_end = row_start + unpadded_bytes_per_row as usize;
-            frame_data.extend_from_slice(&data[row_start..row_end]);
+            let row_data = &data[row_start..row_end];
+            frame_data.extend_from_slice(row_data);
+            
+            // Check first pixel of first row
+            if y == 0 {
+                first_pixel.copy_from_slice(&row_data[0..4]);
+            }
+            
+            // Check if all pixels are the same (which would indicate no rendering)
+            for x in 0..self.config.width {
+                let pixel_offset = (x * 4) as usize;
+                if pixel_offset + 4 <= row_data.len() {
+                    let pixel = &row_data[pixel_offset..pixel_offset + 4];
+                    if pixel != &first_pixel[..] {
+                        all_same = false;
+                    }
+                }
+            }
+        }
+        
+        // Debug output on first capture
+        static mut FIRST_CAPTURE: bool = true;
+        unsafe {
+            if FIRST_CAPTURE {
+                FIRST_CAPTURE = false;
+                println!("Capture debug - first pixel BGRA: {:?}", first_pixel);
+                println!("Capture debug - all pixels same: {}", all_same);
+                println!("Capture debug - expected clear color BGRA: [38, 0, 0, 255] (dark blue)");
+                println!("Capture debug - frame data size: {} bytes", frame_data.len());
+                println!("Capture debug - expected size: {} bytes", self.config.width * self.config.height * 4);
+                
+                // Check a few more pixels
+                if frame_data.len() >= 16 {
+                    println!("Capture debug - first 4 pixels BGRA:");
+                    for i in 0..4 {
+                        let offset = i * 4;
+                        println!("  Pixel {}: [{}, {}, {}, {}]", i, 
+                            frame_data[offset], frame_data[offset+1], 
+                            frame_data[offset+2], frame_data[offset+3]);
+                    }
+                }
+            }
         }
         
         drop(data);
@@ -314,6 +382,11 @@ impl DualRenderer {
             
             self.camera.update_aspect_ratio(self.config.width as f32 / self.config.height as f32);
             self.update_uniform_buffer(gpu);
+            
+            // If we have capture resources, we need to recreate them with the new size
+            if self.capture_texture.is_some() {
+                println!("Warning: Window resized during capture mode. Capture texture size may mismatch!");
+            }
         }
     }
     
@@ -527,6 +600,16 @@ impl DualRenderer {
         });
         
         render_pass.set_pipeline(&self.render_pipeline);
+        
+        // Debug output
+        static mut RENDER_COUNT: u32 = 0;
+        unsafe {
+            if RENDER_COUNT < 5 {
+                println!("Render pass {} - Oracle vertices: {}, GPU vertices: {}", 
+                    RENDER_COUNT, self.oracle_vertex_count, self.gpu_vertex_count);
+                RENDER_COUNT += 1;
+            }
+        }
         
         // Draw oracle scene (green/transparent)
         if self.oracle_vertex_count > 0 {
