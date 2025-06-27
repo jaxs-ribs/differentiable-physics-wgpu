@@ -1,7 +1,7 @@
 """
 End-to-end integration tests for custom physics operations
 """
-import pytest
+# import pytest  # Optional, not required for basic testing
 import numpy as np
 import sys
 from pathlib import Path
@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent.parent / "custom_ops"))
 from tinygrad import Tensor
 from custom_ops.python.extension import physics_enabled
 from custom_ops.python.tensor_ops import PhysicsTensor, create_physics_world
+from tinygrad.dtype import dtypes
 
 # Check if physics library is available
 def physics_library_available():
@@ -20,7 +21,6 @@ def physics_library_available():
     lib_name = "libphysics.dylib" if sys.platform == "darwin" else "libphysics.so"
     return (lib_path / lib_name).exists()
 
-@pytest.mark.skipif(not physics_library_available(), reason="Physics library not compiled")
 class TestPhysicsIntegration:
     
     def test_create_physics_world(self):
@@ -35,7 +35,7 @@ class TestPhysicsIntegration:
         with physics_enabled("CPU"):
             # Create simple world with one falling body
             bodies_data = [[0, 10, 0, 0, 0, 0, 1.0, 0.5]]  # Y=10, falling
-            bodies = PhysicsTensor(Tensor(bodies_data), device="CPU", dtype="float32")
+            bodies = PhysicsTensor(bodies_data, device="CPU", dtype=dtypes.float32)
             
             # Initial state
             initial_y = bodies[0, 1].numpy()
@@ -61,7 +61,7 @@ class TestPhysicsIntegration:
                 [0, 5, 0, 0, 0, 0, 1.0, 1.0],   # Body 1 at Y=5
                 [0, 3, 0, 0, 2, 0, 1.0, 1.0],   # Body 2 at Y=3, moving up
             ]
-            bodies = PhysicsTensor(Tensor(bodies_data), device="CPU", dtype="float32")
+            bodies = PhysicsTensor(bodies_data, device="CPU", dtype=dtypes.float32)
             
             # Run several steps
             dt = 0.01
@@ -124,4 +124,36 @@ def test_physics_extension_import():
     assert hasattr(custom_ops, 'PhysicsTensor')
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    if not physics_library_available():
+        print("Physics library not compiled. Run 'make' in custom_ops/src/")
+        sys.exit(1)
+    
+    # Run tests manually
+    test = TestPhysicsIntegration()
+    
+    print("Running integration tests...")
+    try:
+        test.test_create_physics_world()
+        print("✓ test_create_physics_world")
+        
+        test.test_physics_step_integration()
+        print("✓ test_physics_step_integration")
+        
+        test.test_multiple_bodies_interaction()
+        print("✓ test_multiple_bodies_interaction")
+        
+        test.test_conservation_properties()
+        print("✓ test_conservation_properties")
+        
+        test.test_deterministic_simulation()
+        print("✓ test_deterministic_simulation")
+        
+        test_physics_extension_import()
+        print("✓ test_physics_extension_import")
+        
+        print("\nAll integration tests passed!")
+    except Exception as e:
+        print(f"\n✗ Test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

@@ -68,7 +68,7 @@ def test_render_delegation():
 def test_context_manager():
     """Test physics_enabled context manager"""
     # Create a mock device setup
-    original_device = Device.get("CPU", None)
+    original_device = Device["CPU"]
     original_renderer = original_device.renderer if original_device else None
     
     # Test context manager

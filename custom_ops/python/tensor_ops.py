@@ -53,7 +53,8 @@ class PhysicsTensor(Tensor):
             output_np.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
         )
         
-        return Tensor(output_np, device=bodies.device, dtype=bodies.dtype)
+        # Return PhysicsTensor to maintain the type
+        return PhysicsTensor(output_np, device=bodies.device, dtype=bodies.dtype)
     
     def integrate(self, dt: float) -> 'PhysicsTensor':
         """Integrate physics bodies by one time step"""
@@ -95,7 +96,8 @@ def create_physics_world(n_bodies: int = 10, device: str = "CPU") -> PhysicsTens
     
     # Create tensor and convert to PhysicsTensor
     tensor_data = Tensor(bodies_data, device=device, dtype=dtypes.float32)
-    return PhysicsTensor(tensor_data.data, device=device, dtype=dtypes.float32)
+    # PhysicsTensor inherits from Tensor, so we need to create it from the numpy data
+    return PhysicsTensor(bodies_data, device=device, dtype=dtypes.float32)
 
 def visualize_positions(bodies: Tensor, step: int):
     """Simple text visualization of body positions"""

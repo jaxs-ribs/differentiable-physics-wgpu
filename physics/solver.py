@@ -4,7 +4,7 @@ This module resolves collisions by applying impulses to separate colliding bodie
 and simulate realistic bouncing/sliding behavior. This implementation is fully
 vectorized and JIT-compatible, processing all contacts simultaneously.
 """
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 from .types import BodySchema
 from .math_utils import get_world_inv_inertia
 

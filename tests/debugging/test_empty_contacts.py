@@ -3,12 +3,13 @@
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add parent directories to path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 import numpy as np
 from physics.types import BodySchema
 from physics.solver import resolve_collisions
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 
 def test_empty_contacts():
     """Test what happens when resolve_collisions is called with no contacts."""
@@ -23,11 +24,11 @@ def test_empty_contacts():
     bodies_tensor = Tensor(bodies)
     
     # Create empty contact data (what narrowphase returns when no contacts)
-    pair_indices = Tensor.zeros((0, 2))  # Empty pairs
+    pair_indices = Tensor.zeros((0, 2), dtype=dtypes.int32)  # Empty pairs
     contact_normals = Tensor.zeros((0, 3))
     contact_depths = Tensor.zeros((0,))
     contact_points = Tensor.zeros((0, 3))
-    contact_mask = Tensor.zeros((0,))
+    contact_mask = Tensor.zeros((0,), dtype=dtypes.bool)
     
     print(f"Input shapes:")
     print(f"  pair_indices: {pair_indices.shape}")
