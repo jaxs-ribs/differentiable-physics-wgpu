@@ -46,10 +46,20 @@ pub struct DualRenderer {
     // Debug flags
     show_aabbs: bool,
     show_contacts: bool,
+    
+    // Frame capture resources (for video recording)
+    capture_texture: Option<wgpu::Texture>,
+    capture_view: Option<wgpu::TextureView>,
+    staging_buffer: Option<wgpu::Buffer>,
+    bytes_per_row: u32,
 }
 
 impl DualRenderer {
     pub async fn new(window_manager: &WindowManager, gpu: &GpuContext) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::new_with_capture(window_manager, gpu, false).await
+    }
+    
+    pub async fn new_with_capture(window_manager: &WindowManager, gpu: &GpuContext, enable_capture: bool) -> Result<Self, Box<dyn std::error::Error>> {
         let surface = Self::create_surface(window_manager, gpu)?;
         let config = Self::create_surface_config(&surface, gpu, window_manager)?;
         surface.configure(&gpu.device, &config);
@@ -98,6 +108,43 @@ impl DualRenderer {
         let shader = Self::create_dual_shader(&gpu.device);
         let render_pipeline = Self::create_render_pipeline(gpu, &shader, &bind_group_layout, config.format);
         
+        // Create capture resources if requested
+        let (capture_texture, capture_view, staging_buffer, bytes_per_row) = if enable_capture {
+            // Calculate aligned bytes per row
+            let unpadded_bytes_per_row = config.width * 4; // BGRA8
+            let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+            let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
+            
+            let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Capture Texture"),
+                size: wgpu::Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            
+            let buffer_size = padded_bytes_per_row as u64 * config.height as u64;
+            let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Capture Staging Buffer"),
+                size: buffer_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            
+            (Some(texture), Some(view), Some(buffer), padded_bytes_per_row)
+        } else {
+            (None, None, None, 0)
+        };
+        
         Ok(Self {
             surface,
             config,
@@ -114,6 +161,10 @@ impl DualRenderer {
             camera,
             show_aabbs: false,
             show_contacts: false,
+            capture_texture,
+            capture_view,
+            staging_buffer,
+            bytes_per_row,
         })
     }
     
@@ -163,7 +214,7 @@ impl DualRenderer {
     
     pub fn render(&self, gpu: &GpuContext) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let surface_view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         
         // Update the camera uniform buffer on every frame
         self.update_uniform_buffer(gpu);
@@ -172,12 +223,81 @@ impl DualRenderer {
             label: Some("Dual Render Encoder"),
         });
         
-        self.encode_dual_render_pass(&mut encoder, &view);
+        // Render to capture texture if available
+        if let Some(capture_view) = &self.capture_view {
+            self.encode_dual_render_pass(&mut encoder, capture_view);
+        }
+        
+        // Always render to surface
+        self.encode_dual_render_pass(&mut encoder, &surface_view);
         
         gpu.queue.submit(Some(encoder.finish()));
         output.present();
         
         Ok(())
+    }
+    
+    pub fn capture_frame(&self, gpu: &GpuContext) -> Option<Vec<u8>> {
+        let capture_texture = self.capture_texture.as_ref()?;
+        let staging_buffer = self.staging_buffer.as_ref()?;
+        
+        // Create encoder to copy texture to buffer
+        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Capture Encoder"),
+        });
+        
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: capture_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: staging_buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(self.bytes_per_row),
+                    rows_per_image: Some(self.config.height),
+                },
+            },
+            wgpu::Extent3d {
+                width: self.config.width,
+                height: self.config.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        
+        gpu.queue.submit(Some(encoder.finish()));
+        
+        // Map buffer and read data
+        let buffer_slice = staging_buffer.slice(..);
+        let (tx, rx) = futures::channel::oneshot::channel();
+        
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            tx.send(result).unwrap();
+        });
+        
+        gpu.device.poll(wgpu::MaintainBase::Wait);
+        
+        pollster::block_on(rx).unwrap().ok()?;
+        
+        let data = buffer_slice.get_mapped_range();
+        
+        // Convert from padded rows to continuous data
+        let mut frame_data = Vec::with_capacity((self.config.width * self.config.height * 4) as usize);
+        let unpadded_bytes_per_row = self.config.width * 4;
+        
+        for y in 0..self.config.height {
+            let row_start = (y * self.bytes_per_row) as usize;
+            let row_end = row_start + unpadded_bytes_per_row as usize;
+            frame_data.extend_from_slice(&data[row_start..row_end]);
+        }
+        
+        drop(data);
+        staging_buffer.unmap();
+        
+        Some(frame_data)
     }
     
     pub fn resize(&mut self, gpu: &GpuContext, new_size: winit::dpi::PhysicalSize<u32>) {

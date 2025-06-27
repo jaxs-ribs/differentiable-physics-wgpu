@@ -4,12 +4,13 @@ use physics_core::{
     gpu::GpuContext,
     viz::{WindowManager, DualRenderer},
 };
-use std::{path::PathBuf, time::{Instant, Duration}};
+use std::{path::PathBuf, time::{Instant, Duration}, process::Command, sync::{Arc, Mutex}};
 use winit::{
     dpi::PhysicalPosition,
     event::{ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
 };
+use image::{ImageBuffer, Rgba};
 
 #[derive(Parser, Debug)]
 #[command(name = "debug_viz")]
@@ -22,43 +23,21 @@ struct Args {
     /// Path to the GPU state file
     #[arg(long)]
     gpu: Option<PathBuf>,
+    
+    /// Path to save video recording (e.g., preview.mp4)
+    #[arg(long)]
+    record: Option<PathBuf>,
+    
+    /// Duration of recording in seconds (default: 5)
+    #[arg(long, default_value = "5")]
+    duration: f32,
+    
+    /// Frames per second for recording (default: 30)
+    #[arg(long, default_value = "30")]
+    fps: u32,
 }
 
-fn create_default_demo_scene() -> Vec<Body> {
-    // Create a simple stack of 3 spheres for demo
-    vec![
-        // Ground sphere (large, static)
-        Body {
-            position: [0.0, 0.0, 0.0, 0.0],
-            velocity: [0.0, 0.0, 0.0, 0.0],
-            orientation: [1.0, 0.0, 0.0, 0.0], // Identity quaternion
-            angular_vel: [0.0, 0.0, 0.0, 0.0],
-            mass_data: [1e8, 0.0, 0.0, 0.0], // Very large mass = static
-            shape_data: [0, 0, 0, 0], // Shape type 0 = sphere
-            shape_params: [5.0, 0.0, 0.0, 0.0], // Radius 5
-        },
-        // Middle sphere
-        Body {
-            position: [0.0, 7.0, 0.0, 0.0],
-            velocity: [0.0, 0.0, 0.0, 0.0],
-            orientation: [1.0, 0.0, 0.0, 0.0],
-            angular_vel: [0.0, 0.0, 0.0, 0.0],
-            mass_data: [1.0, 1.0, 0.0, 0.0],
-            shape_data: [0, 0, 0, 0], // Sphere
-            shape_params: [1.0, 0.0, 0.0, 0.0], // Radius 1
-        },
-        // Top sphere
-        Body {
-            position: [2.0, 9.0, 0.0, 0.0],
-            velocity: [0.0, 0.0, 0.0, 0.0],
-            orientation: [1.0, 0.0, 0.0, 0.0],
-            angular_vel: [0.0, 0.0, 0.0, 0.0],
-            mass_data: [1.0, 1.0, 0.0, 0.0],
-            shape_data: [0, 0, 0, 0], // Sphere
-            shape_params: [1.0, 0.0, 0.0, 0.0], // Radius 1
-        },
-    ]
-}
+
 
 fn load_body_trace_from_npy(
     path: &PathBuf,
@@ -146,24 +125,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     
+    // Setup video recording if requested
+    let recording = args.record.is_some();
+    
     let event_loop = EventLoop::new()?;
     let window_manager = WindowManager::new(&event_loop)?;
     let gpu_context = pollster::block_on(GpuContext::new())?;
-    let mut renderer = pollster::block_on(DualRenderer::new(&window_manager, &gpu_context))?;
+    let mut renderer = pollster::block_on(DualRenderer::new_with_capture(&window_manager, &gpu_context, recording))?;
+    
+    let output_path = args.record.clone();
+    // For recording, create a fixed-size window
+    if recording {
+        // Resize window to 800x600 for consistent video size
+        let _ = window_manager.window().request_inner_size(winit::dpi::LogicalSize::new(800, 600));
+    }
+    
+    let captured_frames = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
     
     let mut current_frame = 0;
-    let frame_duration = Duration::from_millis(16); // ~60 FPS
+    let recording_fps = args.fps;
+    let frame_duration = if recording {
+        Duration::from_millis(1000 / recording_fps as u64)
+    } else {
+        Duration::from_millis(16) // ~60 FPS for interactive mode
+    };
     let mut last_update = Instant::now();
+    let max_frames = (recording_fps as f32 * args.duration) as usize;
 
     let mut mouse_pressed = false;
     let mut last_mouse_pos: PhysicalPosition<f64> = PhysicalPosition::new(0.0, 0.0);
     const MOUSE_SENSITIVITY: f32 = 0.01;
+    
+    let captured_frames_clone = captured_frames.clone();
     
     event_loop.run(move |event, elwt| {
         elwt.set_control_flow(ControlFlow::Poll);
 
         match event {
             Event::AboutToWait => {
+                // Check if recording should end
+                if recording && captured_frames_clone.lock().unwrap().len() >= max_frames {
+                    elwt.exit();
+                }
+                
                 if last_update.elapsed() >= frame_duration {
                     current_frame = (current_frame + 1) % num_frames;
                     
@@ -220,7 +224,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 WindowEvent::RedrawRequested => {
                     match renderer.render(&gpu_context) {
-                        Ok(_) => {}
+                        Ok(_) => {
+                            // Capture frame if recording
+                            if recording && captured_frames_clone.lock().unwrap().len() < max_frames {
+                                if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
+                                    captured_frames_clone.lock().unwrap().push(frame_data);
+                                }
+                            }
+                        }
                         Err(wgpu::SurfaceError::Lost) => {
                             renderer.resize(&gpu_context, window_manager.inner_size())
                         }
@@ -233,6 +244,71 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         }
     })?;
+    
+    // Save video if recording
+    if recording {
+        if let Some(output_path) = output_path {
+            let frames = captured_frames.lock().unwrap();
+            save_frames_as_video(&*frames, output_path, recording_fps, 800, 600)?;
+        }
+    }
 
+    Ok(())
+}
+
+fn save_frames_as_video(
+    frames: &[Vec<u8>],
+    output_path: PathBuf,
+    fps: u32,
+    width: u32,
+    height: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Saving {} frames to video...", frames.len());
+    
+    // Create temp directory
+    let temp_dir = std::env::temp_dir().join(format!("physics_recording_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir)?;
+    
+    // Save frames as PNG files
+    for (i, frame_data) in frames.iter().enumerate() {
+        let filename = temp_dir.join(format!("frame_{:04}.png", i));
+        
+        // Convert BGRA to RGBA
+        let mut rgba_data = vec![0u8; (width * height * 4) as usize];
+        for j in 0..((width * height) as usize) {
+            rgba_data[j * 4] = frame_data[j * 4 + 2];     // R
+            rgba_data[j * 4 + 1] = frame_data[j * 4 + 1]; // G
+            rgba_data[j * 4 + 2] = frame_data[j * 4];     // B
+            rgba_data[j * 4 + 3] = frame_data[j * 4 + 3]; // A
+        }
+        
+        let img = ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(width, height, rgba_data)
+            .ok_or("Failed to create image buffer")?;
+        img.save(&filename)?;
+    }
+    
+    // Run ffmpeg to create video
+    let status = Command::new("ffmpeg")
+        .args(&[
+            "-y", // Overwrite output
+            "-r", &fps.to_string(),
+            "-i", &temp_dir.join("frame_%04d.png").to_string_lossy(),
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "28",
+            "-pix_fmt", "yuv420p",
+            "-vf", "scale=800:600", // Ensure output size
+            &output_path.to_string_lossy(),
+        ])
+        .status()?;
+    
+    if !status.success() {
+        return Err("FFmpeg encoding failed".into());
+    }
+    
+    // Clean up
+    std::fs::remove_dir_all(&temp_dir)?;
+    println!("Video saved to: {}", output_path.display());
+    
     Ok(())
 }

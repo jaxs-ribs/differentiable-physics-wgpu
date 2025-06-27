@@ -2,6 +2,11 @@
 
 A high-performance, GPU-accelerated rigid body physics engine built with Rust and WebGPU. Designed for massively parallel simulation of thousands of bodies entirely on the GPU.
 
+<video width="800" autoplay loop muted playsinline>
+  <source src="https://raw.githubusercontent.com/<USER>/<REPO>/preview/preview.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
 ## 🚀 Performance
 
 TBD
@@ -151,6 +156,23 @@ This is an active research project exploring GPU-accelerated physics simulation.
 
 - [AGENTS.md](AGENTS.md) - Detailed development history and roadmap
 - [Overview files](src/bin/overview.md) - Descriptions of all binaries and tests
+
+## 🎥 Generating Preview Video
+
+To update the preview video shown at the top of this README:
+
+```bash
+# Requires ffmpeg to be installed
+./scripts/update_preview.sh
+```
+
+This script will:
+1. Generate test physics data
+2. Record a 5-second video of the simulation
+3. Push it to the `preview` branch
+4. The video will be available at the URL in the README
+
+**Note**: Remember to update `<USER>` and `<REPO>` in the video tag above with your GitHub username and repository name.
 
 ## 📄 License
 
