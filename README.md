@@ -1,11 +1,13 @@
 # Physics Core - WebGPU Rigid Body Physics Engine
 
-A high-performance, GPU-accelerated rigid body physics engine built with Rust and WebGPU. Designed for massively parallel simulation of thousands of bodies entirely on the GPU.
-
 <video width="800" autoplay loop muted playsinline>
-  <source src="https://raw.githubusercontent.com/<USER>/<REPO>/preview/preview.mp4" type="video/mp4">
+  <source src="https://raw.githubusercontent.com/jaxs-ribs/differentiable-physics-wgpu/preview/preview.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
+
+*This preview video is automatically generated and updated daily by [`scripts/update_preview.sh`](scripts/update_preview.sh). The script creates a physics simulation with falling spheres and static obstacles, records 5 seconds of GPU-accelerated physics at 30fps, and pushes the video to a separate `preview` branch to keep the main repository lightweight.*
+
+A high-performance, GPU-accelerated rigid body physics engine built with Rust and WebGPU. Designed for massively parallel simulation of thousands of bodies entirely on the GPU.
 
 ## 🚀 Performance
 
