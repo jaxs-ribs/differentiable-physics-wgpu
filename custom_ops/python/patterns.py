@@ -7,9 +7,9 @@ import os
 from pathlib import Path
 from typing import Optional
 
-# Add parent directory to path to import tinygrad
+# Add path to import tinygrad from parent directory
 import sys
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher
 from tinygrad.dtype import dtypes
@@ -17,7 +17,7 @@ from tinygrad.dtype import dtypes
 # Load the physics library
 def load_physics_library():
     """Load the compiled physics shared library"""
-    lib_path = Path(__file__).parent
+    lib_path = Path(__file__).parent.parent / "build"
     lib_name = "libphysics.dylib" if sys.platform == "darwin" else "libphysics.so"
     lib_file = lib_path / lib_name
     

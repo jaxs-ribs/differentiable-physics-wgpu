@@ -10,7 +10,7 @@ def test_physics_library():
     """Test the physics library functions directly"""
     
     # Load library
-    lib_path = Path(__file__).parent
+    lib_path = Path(__file__).parent.parent.parent.parent / "custom_ops" / "build"
     lib_name = "libphysics.dylib" if sys.platform == "darwin" else "libphysics.so"
     lib_file = lib_path / lib_name
     

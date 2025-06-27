@@ -12,7 +12,7 @@ else
     LIB_EXT = .so
 endif
 
-TARGET = libphysics$(LIB_EXT)
+TARGET = ../build/libphysics$(LIB_EXT)
 SOURCES = physics_lib.c
 OBJECTS = $(SOURCES:.c=.o)
 

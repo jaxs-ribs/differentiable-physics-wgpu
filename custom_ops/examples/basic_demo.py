@@ -6,13 +6,14 @@ import numpy as np
 from pathlib import Path
 import sys
 
-# Add parent directory to path to import tinygrad
+# Add path to import tinygrad and custom_ops
+sys.path.append(str(Path(__file__).parent.parent.parent))
 sys.path.append(str(Path(__file__).parent.parent))
 
 from tinygrad import Tensor, Device
 from tinygrad.helpers import DEBUG
-from physics_extension import enable_physics_on_device, physics_enabled
-from physics_patterns import physics_step
+from custom_ops.python.extension import enable_physics_on_device, physics_enabled
+from custom_ops.python.patterns import physics_step
 
 def create_test_bodies(n_bodies: int = 10):
     """
@@ -106,7 +107,7 @@ def simulate_physics_custom():
         
     finally:
         # Clean up
-        from physics_extension import disable_physics_on_device
+        from custom_ops.python.extension import disable_physics_on_device
         disable_physics_on_device("CPU")
 
 def demonstrate_context_manager():
@@ -130,7 +131,7 @@ def main():
     
     # Check if physics library is compiled
     from pathlib import Path
-    lib_path = Path(__file__).parent / ("libphysics.dylib" if sys.platform == "darwin" else "libphysics.so")
+    lib_path = Path(__file__).parent.parent / "build" / ("libphysics.dylib" if sys.platform == "darwin" else "libphysics.so")
     if not lib_path.exists():
         print(f"ERROR: Physics library not found at {lib_path}")
         print("Please run 'make' in the physics_core directory first")

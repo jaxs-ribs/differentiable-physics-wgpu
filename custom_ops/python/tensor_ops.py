@@ -7,13 +7,13 @@ import sys
 import ctypes
 import numpy as np
 
-# Add parent directory to path to import tinygrad
-sys.path.append(str(Path(__file__).parent.parent))
+# Add path to import tinygrad from parent directory
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from tinygrad import Tensor
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
-from physics_extension import physics_enabled
+from .extension import physics_enabled
 
 class PhysicsTensor(Tensor):
     """
@@ -37,7 +37,7 @@ class PhysicsTensor(Tensor):
         # In a real implementation, this would be integrated with the tensor's UOp graph
         
         # For demonstration, we'll use ctypes to call the C function directly
-        from physics_patterns import get_physics_lib
+        from .patterns import get_physics_lib
         lib = get_physics_lib()
         
         # Convert tensor to numpy for ctypes
@@ -175,7 +175,7 @@ def benchmark_physics():
 
 if __name__ == "__main__":
     # Check if physics library exists
-    lib_path = Path(__file__).parent / ("libphysics.dylib" if sys.platform == "darwin" else "libphysics.so")
+    lib_path = Path(__file__).parent.parent / "build" / ("libphysics.dylib" if sys.platform == "darwin" else "libphysics.so")
     if not lib_path.exists():
         print(f"ERROR: Physics library not found at {lib_path}")
         print("Please run 'make' in the physics_core directory first")

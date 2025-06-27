@@ -5,13 +5,13 @@ Extends existing TinyGrad devices with physics operation support
 from pathlib import Path
 import sys
 
-# Add parent directory to path to import tinygrad
-sys.path.append(str(Path(__file__).parent.parent))
+# Add path to import tinygrad from parent directory
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher
-from physics_patterns import create_physics_patterns, create_physics_renderer_extensions, get_physics_lib
+from .patterns import create_physics_patterns, create_physics_renderer_extensions, get_physics_lib
 
 class PhysicsEnabledRenderer(Renderer):
     """
