@@ -176,6 +176,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     renderer.update_scenes(&gpu_context, oracle_bodies, gpu_bodies);
                     
+                    // During recording, we need to render and capture immediately
+                    if recording {
+                        match renderer.render(&gpu_context) {
+                            Ok(_) => {
+                                if captured_frames_clone.lock().unwrap().len() < max_frames {
+                                    if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
+                                        captured_frames_clone.lock().unwrap().push(frame_data);
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("Render error during recording: {:?}", e),
+                        }
+                    }
+                    
                     last_update = Instant::now();
                     window_manager.window().request_redraw();
                 }
@@ -223,20 +237,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     _ => {}
                 },
                 WindowEvent::RedrawRequested => {
-                    match renderer.render(&gpu_context) {
-                        Ok(_) => {
-                            // Capture frame if recording
-                            if recording && captured_frames_clone.lock().unwrap().len() < max_frames {
-                                if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
-                                    captured_frames_clone.lock().unwrap().push(frame_data);
-                                }
+                    // During recording, rendering is handled in AboutToWait
+                    if !recording {
+                        match renderer.render(&gpu_context) {
+                            Ok(_) => {}
+                            Err(wgpu::SurfaceError::Lost) => {
+                                renderer.resize(&gpu_context, window_manager.inner_size())
                             }
+                            Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
+                            Err(e) => eprintln!("Render error: {:?}", e),
                         }
-                        Err(wgpu::SurfaceError::Lost) => {
-                            renderer.resize(&gpu_context, window_manager.inner_size())
-                        }
-                        Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
-                        Err(e) => eprintln!("Render error: {:?}", e),
                     }
                 }
                 _ => {}

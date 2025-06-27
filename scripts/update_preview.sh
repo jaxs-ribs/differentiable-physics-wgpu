@@ -9,11 +9,22 @@ NC='\033[0m' # No Color
 
 echo -e "${BLUE}=== Physics Engine Preview Video Generator ===${NC}\n"
 
-# Check for clean working directory
+# Handle uncommitted changes
 if [[ -n $(git status --porcelain) ]]; then
-    echo -e "${RED}Error: Working directory is not clean${NC}"
-    echo "Please commit or stash your changes before running this script"
-    exit 1
+    echo -e "${RED}Warning: Working directory has uncommitted changes${NC}"
+    echo "The following files have changes:"
+    git status --short
+    echo
+    read -p "Do you want to stash these changes? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${BLUE}Stashing changes...${NC}"
+        git stash push -m "preview-generation-stash-$(date +%s)"
+        STASHED=true
+    else
+        echo -e "${RED}Aborting. Please commit or stash your changes manually.${NC}"
+        exit 1
+    fi
 fi
 
 # Check for ffmpeg
@@ -88,6 +99,12 @@ git checkout $CURRENT_BRANCH
 
 # Clean up
 rm -f preview.mp4
+
+# Restore stashed changes if any
+if [ "$STASHED" = true ]; then
+    echo -e "\n${BLUE}Restoring stashed changes...${NC}"
+    git stash pop
+fi
 
 echo -e "\n${GREEN}✅ Preview updated successfully!${NC}"
 echo -e "Video is now available at:"
