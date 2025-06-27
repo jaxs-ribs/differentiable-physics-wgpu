@@ -1,4 +1,4 @@
-"""Sweep and Prune broadphase collision detection.
+"""Broadphase collision detection using differentiable all-pairs approach.
 
 Broadphase collision detection quickly finds pairs of bodies that might be
 colliding by checking if their axis-aligned bounding boxes (AABBs) overlap.
@@ -21,7 +21,7 @@ This will be replaced with a GPU-parallel sort in Phase 2 (WGSL kernel).
 import numpy as np
 from tinygrad import Tensor
 from .types import BodySchema, ShapeType
-from .math_utils import quat_to_rotmat_np
+from .math_utils import quat_to_rotmat_np, quat_to_rotmat
 
 def compute_aabb(position: np.ndarray, rotation: np.ndarray, shape_type: int, 
                  shape_params: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -115,3 +115,7 @@ def broadphase_sweep_and_prune(bodies: Tensor) -> Tensor:
     else: active.discard(body_idx)
   
   return Tensor(np.array(list(overlaps), dtype=np.int32)) if overlaps else Tensor(np.empty((0, 2), dtype=np.int32))
+
+# Import the differentiable broadphase from the tensor module
+from .broadphase_tensor import differentiable_broadphase
+

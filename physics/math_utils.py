@@ -55,6 +55,39 @@ def get_world_inv_inertia(q: Tensor, local_inv_inertia: Tensor) -> Tensor:
     world_inv_inertias.append(inv_I_world.flatten())
   return Tensor(np.stack(world_inv_inertias), device="CPU")
 
+def quat_to_rotmat(q: Tensor) -> Tensor:
+  """Convert quaternions to rotation matrices using pure tensor operations.
+  
+  Args:
+    q: Quaternions as tensor of shape (N, 4) in [w, x, y, z] format
+    
+  Returns:
+    Rotation matrices as tensor of shape (N, 3, 3)
+  """
+  w, x, y, z = q[:, 0:1], q[:, 1:2], q[:, 2:3], q[:, 3:4]
+  # Pre-compute squares and products
+  x2, y2, z2 = x*x, y*y, z*z
+  wx, wy, wz = w*x, w*y, w*z
+  xy, xz, yz = x*y, x*z, y*z
+  
+  # Build rotation matrix components
+  r00 = 1 - 2*(y2 + z2)
+  r01 = 2*(xy - wz)
+  r02 = 2*(xz + wy)
+  r10 = 2*(xy + wz)
+  r11 = 1 - 2*(x2 + z2)
+  r12 = 2*(yz - wx)
+  r20 = 2*(xz - wy)
+  r21 = 2*(yz + wx)
+  r22 = 1 - 2*(x2 + y2)
+  
+  # Stack into 3x3 matrices - concat columns, then reshape
+  row0 = Tensor.cat(r00, r01, r02, dim=1)
+  row1 = Tensor.cat(r10, r11, r12, dim=1)
+  row2 = Tensor.cat(r20, r21, r22, dim=1)
+  # Stack rows and reshape to (N, 3, 3)
+  return Tensor.stack(row0, row1, row2, dim=1).reshape(-1, 3, 3)
+
 def quat_to_rotmat_np(q_np: np.ndarray) -> np.ndarray:
   """Convert quaternions to rotation matrices (numpy version for CPU ops).
   

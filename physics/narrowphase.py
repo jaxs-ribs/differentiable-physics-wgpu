@@ -94,19 +94,30 @@ def sphere_box_collision(sphere_pos: np.ndarray, sphere_radius: float,
     return Contact(pair_indices=(0, 0), normal=normal, depth=depth, point=closest_point_world)
   return None
 
-def narrowphase(bodies: Tensor, pairs: Tensor) -> list[Contact]:
+def narrowphase(bodies: Tensor, pair_indices: Tensor, collision_mask: Tensor) -> list[Contact]:
   """Perform exact collision detection on potentially colliding pairs.
   
   Args:
     bodies: State tensor of shape (N, NUM_PROPERTIES)
-    pairs: Tensor of shape (M, 2) with indices of potentially colliding bodies
+    pair_indices: Tensor of shape (M, 2) with indices of all pairs
+    collision_mask: Boolean tensor of shape (M,) indicating which pairs have overlapping AABBs
     
   Returns:
     List of Contact objects with collision information
   """
-  if pairs.shape[0] == 0: return []
+  # Filter to only pairs with overlapping AABBs
+  mask_np = collision_mask.numpy()
+  if not mask_np.any(): return []
   
-  bodies_np, pairs_np = bodies.numpy(), pairs.numpy()
+  bodies_np = bodies.numpy()
+  pair_indices_np = pair_indices.numpy()
+  
+  # Ensure mask has same length as pair_indices
+  if len(mask_np) != len(pair_indices_np):
+    print(f"Warning: mask length {len(mask_np)} != pair_indices length {len(pair_indices_np)}")
+    return []
+    
+  active_pairs = pair_indices_np[mask_np]
   contacts = []
   
   # Extract relevant data for all bodies
@@ -115,7 +126,7 @@ def narrowphase(bodies: Tensor, pairs: Tensor) -> list[Contact]:
   shape_types = bodies_np[:, BodySchema.SHAPE_TYPE].astype(int)
   shape_params = bodies_np[:, BodySchema.SHAPE_PARAM_1:BodySchema.SHAPE_PARAM_3+1]
   
-  for i, j in pairs_np:
+  for i, j in active_pairs:
     type_i, type_j = shape_types[i], shape_types[j]
     
     # Sphere vs Sphere
