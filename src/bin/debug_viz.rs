@@ -184,17 +184,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if recording {
                         match renderer.render(&gpu_context) {
                             Ok(_) => {
-                                // Force GPU to complete all pending operations
-                                gpu_context.device.poll(wgpu::MaintainBase::Wait);
-                                gpu_context.queue.submit(std::iter::empty());
-                                gpu_context.device.poll(wgpu::MaintainBase::Wait);
-                                
                                 let current_count = captured_frames_clone.lock().unwrap().len();
                                 if current_count < max_frames {
                                     if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
                                         captured_frames_clone.lock().unwrap().push(frame_data);
                                         if current_count % 30 == 0 {
                                             println!("Captured frame {} of {}", current_count + 1, max_frames);
+                                            // Debug: print first few bytes to see if it's all grey
+                                            if current_count == 0 {
+                                                println!("First 16 bytes: {:?}", &frame_data[..16.min(frame_data.len())]);
+                                            }
                                         }
                                     }
                                 }

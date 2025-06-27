@@ -10,8 +10,8 @@ use super::{
 const MAX_AABB_COUNT: usize = 1000;
 const VERTEX_BUFFER_SIZE: u64 = 12 * 2 * 6 * 4 * MAX_AABB_COUNT as u64;
 const CLEAR_COLOR: wgpu::Color = wgpu::Color {
-    r: 0.15,
-    g: 0.15,
+    r: 0.0,
+    g: 0.0,
     b: 0.15,
     a: 1.0,
 };
@@ -542,15 +542,6 @@ impl DualRenderer {
             render_pass.draw(0..self.gpu_vertex_count, 0..1);
         }
         
-        // Debug: print what we're drawing during capture
-        static mut FRAME_COUNT: u32 = 0;
-        unsafe {
-            if FRAME_COUNT < 5 && self.capture_texture.is_some() {
-                println!("Capture frame {}: oracle_vertices={}, gpu_vertices={}", 
-                    FRAME_COUNT, self.oracle_vertex_count, self.gpu_vertex_count);
-                FRAME_COUNT += 1;
-            }
-        }
     }
     
     fn update_uniform_buffer(&self, gpu: &GpuContext) {
