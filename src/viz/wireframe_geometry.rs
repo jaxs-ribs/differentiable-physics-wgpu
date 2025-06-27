@@ -62,7 +62,8 @@ impl WireframeGeometry {
     }
     
     fn get_body_color(body: &Body) -> [f32; 3] {
-        if body.shape_data[1] == 1 {
+        // Bodies with very large mass (>1000) are considered static
+        if body.mass_data[0] > 1000.0 {
             STATIC_BODY_COLOR
         } else {
             DYNAMIC_BODY_COLOR

@@ -232,6 +232,12 @@ impl DualRenderer {
         self.encode_dual_render_pass(&mut encoder, &surface_view);
         
         gpu.queue.submit(Some(encoder.finish()));
+        
+        // Wait for GPU to finish if we're capturing frames
+        if self.capture_texture.is_some() {
+            gpu.device.poll(wgpu::MaintainBase::Wait);
+        }
+        
         output.present();
         
         Ok(())
