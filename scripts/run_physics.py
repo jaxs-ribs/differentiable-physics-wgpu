@@ -8,6 +8,13 @@ Usage:
   python3 run_physics.py --steps 200
   python3 run_physics.py --steps 500 --output artifacts/my_simulation.npy
 """
+import sys
+import os
+
+# Add parent directory to path so we can import physics modules
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
 from physics.main import main
 
 if __name__ == "__main__":

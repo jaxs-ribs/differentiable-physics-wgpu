@@ -16,10 +16,13 @@ cd physics_core/
 
 ```bash
 # Run the physics simulation (creates artifacts/oracle_dump.npy)
-python3 -m physics.main --steps 200
+./run --steps 200
 
 # Run all tests (7 comprehensive tests)
-python3 tests/run_ci.py
+./ci
+
+# Run interactive test hell session
+./test
 ```
 
 ## Key Features
@@ -63,10 +66,19 @@ physics_core/
 │   ├── integration/        # System tests
 │   ├── benchmarks/         # Performance tests
 │   └── debugging/          # Diagnostic tools
-├── artifacts/               # Simulation outputs (.npy files)
-├── README.md               # This file
-├── AGENTS.md               # Project vision and phases
-└── BUG_FIXES.md            # Documented issues and solutions
+├── docs/                   # Documentation
+│   ├── AGENTS.md          # Project vision and phases
+│   ├── BUG_FIXES.md       # Documented issues and solutions
+│   ├── TEST_HELL.md       # Interactive test runner guide
+│   └── TEST_SUMMARY.md    # Test results documentation
+├── scripts/                # Utility scripts
+│   ├── run_physics.py     # Physics simulation runner
+│   └── run_test_hell.py   # Interactive test session
+├── artifacts/              # Simulation outputs (.npy files)
+├── external/               # External dependencies
+│   ├── tinygrad/          # TinyGrad submodule
+│   └── tinygrad-notes/    # Reference documentation
+└── README.md              # This file
 ```
 
 ## Usage
@@ -254,7 +266,10 @@ Ready for:
 
 ## Documentation
 
-- `AGENTS.md` - Project vision and status
-- `BUG_FIXES.md` - Documented fixes and workarounds
-- `tests/README.md` - Test suite documentation
-- `physics/README.md` - Physics module details
+- [`docs/AGENTS.md`](docs/AGENTS.md) - Project vision and status
+- [`docs/BUG_FIXES.md`](docs/BUG_FIXES.md) - Documented fixes and workarounds
+- [`docs/TEST_HELL.md`](docs/TEST_HELL.md) - Interactive test runner guide
+- [`docs/TEST_SUMMARY.md`](docs/TEST_SUMMARY.md) - Test results documentation
+- [`tests/README.md`](tests/README.md) - Test suite documentation
+- [`physics/README.md`](physics/README.md) - Physics module details
+- [`custom_ops/README.md`](custom_ops/README.md) - Custom operations guide
