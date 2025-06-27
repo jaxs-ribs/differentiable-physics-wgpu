@@ -184,6 +184,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if recording {
                         match renderer.render(&gpu_context) {
                             Ok(_) => {
+                                // Force GPU to complete all pending operations
+                                gpu_context.device.poll(wgpu::MaintainBase::Wait);
+                                gpu_context.queue.submit(std::iter::empty());
+                                gpu_context.device.poll(wgpu::MaintainBase::Wait);
+                                
                                 let current_count = captured_frames_clone.lock().unwrap().len();
                                 if current_count < max_frames {
                                     if let Some(frame_data) = renderer.capture_frame(&gpu_context) {

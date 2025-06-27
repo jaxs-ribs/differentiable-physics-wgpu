@@ -223,21 +223,15 @@ impl DualRenderer {
             label: Some("Dual Render Encoder"),
         });
         
-        // Always render to surface for visual feedback
-        self.encode_dual_render_pass(&mut encoder, &surface_view);
-        
-        // If capturing, also render to capture texture
+        // If capturing, render to capture texture first
         if let Some(capture_view) = &self.capture_view {
             self.encode_dual_render_pass(&mut encoder, capture_view);
         }
         
+        // Always render to surface for visual feedback
+        self.encode_dual_render_pass(&mut encoder, &surface_view);
+        
         gpu.queue.submit(Some(encoder.finish()));
-        
-        // Wait for GPU to finish if we're capturing frames
-        if self.capture_texture.is_some() {
-            gpu.device.poll(wgpu::MaintainBase::Wait);
-        }
-        
         output.present();
         
         Ok(())
@@ -546,6 +540,16 @@ impl DualRenderer {
             render_pass.set_bind_group(0, &self.gpu_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.gpu_line_buffer.slice(..));
             render_pass.draw(0..self.gpu_vertex_count, 0..1);
+        }
+        
+        // Debug: print what we're drawing during capture
+        static mut FRAME_COUNT: u32 = 0;
+        unsafe {
+            if FRAME_COUNT < 5 && self.capture_texture.is_some() {
+                println!("Capture frame {}: oracle_vertices={}, gpu_vertices={}", 
+                    FRAME_COUNT, self.oracle_vertex_count, self.gpu_vertex_count);
+                FRAME_COUNT += 1;
+            }
         }
     }
     
