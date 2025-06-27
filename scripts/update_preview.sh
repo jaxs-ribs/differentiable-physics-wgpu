@@ -82,19 +82,23 @@ cp preview.mp4 "$TEMP_VIDEO"
 echo -e "\n${BLUE}Switching to preview branch...${NC}"
 if git show-ref --verify --quiet refs/heads/preview; then
     git checkout preview
+    # Clear all files from git tracking and working directory
+    git rm -rf . 2>/dev/null || true
+    git clean -fdx
 else
+    # Creating new orphan branch
     git checkout --orphan preview
+    # Remove all files from the index
+    git rm -rf . 2>/dev/null || true
 fi
 
-# Clear all files from git tracking and working directory
-git rm -rf . 2>/dev/null || true
-git clean -fdx
-
 # Copy video back from temp location
+echo -e "${BLUE}Copying video to preview branch...${NC}"
 cp "$TEMP_VIDEO" preview.mp4
 rm -f "$TEMP_VIDEO"
 
 # Add and commit video
+echo -e "${BLUE}Committing video...${NC}"
 git add preview.mp4
 git commit -m "Update preview video"
 
