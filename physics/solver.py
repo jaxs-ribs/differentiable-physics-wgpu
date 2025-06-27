@@ -1,139 +1,193 @@
 """Impulse-based collision resolution solver.
 
 This module resolves collisions by applying impulses to separate colliding bodies
-and simulate realistic bouncing/sliding behavior. We use a sequential impulse
-solver that processes each contact individually.
-
-Physics background:
-- Impulse (J): Change in momentum, J = m * Δv
-- Conservation of momentum: Total momentum before = after collision
-- Restitution (e): "bounciness", 0 = perfectly inelastic, 1 = perfectly elastic
-- Contact constraint: Bodies shouldn't penetrate, relative velocity along normal ≥ 0
-
-The solver calculates impulses that:
-1. Prevent penetration (bodies moving apart along contact normal)
-2. Apply restitution for bouncing
-3. Conserve momentum
-4. Account for rotational effects through the inertia tensor
-
-Additionally, we apply position correction to fix penetration that has already
-occurred due to discrete time stepping. This is a non-physical "nudge" to
-separate overlapping bodies.
+and simulate realistic bouncing/sliding behavior. This implementation is fully
+vectorized and JIT-compatible, processing all contacts simultaneously.
 """
-import numpy as np
 from tinygrad import Tensor
-from .types import BodySchema, Contact
+from .types import BodySchema
 from .math_utils import get_world_inv_inertia
 
-def calculate_impulse_magnitude(inv_mass_i: float, inv_mass_j: float,
-                               inv_I_i: np.ndarray, inv_I_j: np.ndarray,
-                               r_i: np.ndarray, r_j: np.ndarray,
-                               normal: np.ndarray, v_rel_normal: float,
-                               restitution: float) -> float:
-  """Calculate impulse magnitude using the impulse-momentum equation.
-  
-  The impulse magnitude j is derived from:
-  - Relative velocity constraint: v_rel_new · n = -e * v_rel_old · n
-  - Impulse-momentum relation: Δv = j/m for linear, Δω = I^(-1) * (r × j*n) for angular
-  
-  Args:
-    inv_mass_i, inv_mass_j: Inverse masses (0 for static bodies)
-    inv_I_i, inv_I_j: Inverse inertia tensors in world space (3x3)
-    r_i, r_j: Contact point relative to body centers
-    normal: Contact normal (unit vector)
-    v_rel_normal: Relative velocity along normal (negative = approaching)
-    restitution: Coefficient of restitution (0-1)
-    
-  Returns:
-    Impulse magnitude (scalar, applied along normal)
-  """
-  numerator = -(1 + restitution) * v_rel_normal
-  # Effective mass calculation accounts for both linear and rotational inertia
-  linear_term = inv_mass_i + inv_mass_j
-  angular_term_i = np.dot(normal, np.cross(inv_I_i @ np.cross(r_i, normal), r_i))
-  angular_term_j = np.dot(normal, np.cross(inv_I_j @ np.cross(r_j, normal), r_j))
-  denominator = linear_term + angular_term_i + angular_term_j
-  return numerator / denominator
-
-def resolve_collisions(bodies: Tensor, contacts: list[Contact], restitution: float = 0.1) -> Tensor:
+def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Tensor, 
+                      contact_depths: Tensor, contact_points: Tensor, contact_mask: Tensor,
+                      restitution: float = 0.1) -> Tensor:
   """Resolve collisions by applying impulses based on contact information.
   
-  For each contact:
-  1. Calculate relative velocity at contact point
-  2. Check if bodies are separating (no impulse needed)
-  3. Calculate impulse magnitude based on physics constraints
-  4. Apply linear impulse: Δv = j*n / m
-  5. Apply angular impulse: Δω = I^(-1) * (r × j*n)
-  6. Apply position correction to separate penetrating bodies
+  This function is fully vectorized and operates on all contacts simultaneously.
+  It uses scatter operations to correctly handle multiple collisions per body.
   
   Args:
     bodies: State tensor of shape (N, NUM_PROPERTIES)
-    contacts: List of Contact objects from narrowphase
+    pair_indices: Tensor of shape (M, 2) with body indices for each contact
+    contact_normals: Tensor of shape (M, 3) with contact normals
+    contact_depths: Tensor of shape (M,) with penetration depths
+    contact_points: Tensor of shape (M, 3) with contact points
+    contact_mask: Tensor of shape (M,) boolean mask for valid contacts
     restitution: Coefficient of restitution (0 = no bounce, 1 = perfect bounce)
     
   Returns:
     Updated state tensor with resolved collisions
   """
-  if not contacts: return bodies
+  n_bodies = bodies.shape[0]
+  n_contacts = pair_indices.shape[0]
   
-  bodies_np = bodies.numpy()
+  # Handle empty case with masking instead of early return
   
-  # Extract all relevant arrays for efficiency
-  positions = bodies_np[:, BodySchema.POS_X:BodySchema.POS_Z+1]
-  velocities = bodies_np[:, BodySchema.VEL_X:BodySchema.VEL_Z+1]
-  ang_velocities = bodies_np[:, BodySchema.ANG_VEL_X:BodySchema.ANG_VEL_Z+1]
-  inv_masses = bodies_np[:, BodySchema.INV_MASS]
-  inv_inertias_local = bodies_np[:, BodySchema.INV_INERTIA_XX:BodySchema.INV_INERTIA_ZZ+1]
-  quats = bodies_np[:, BodySchema.QUAT_W:BodySchema.QUAT_Z+1]
+  # Gather body data for all contacts using pure tensor operations
+  indices_a = pair_indices[:, 0]
+  indices_b = pair_indices[:, 1]
+  
+  # Gather full body data for each pair
+  # We need to expand indices to match the shape of bodies
+  indices_a_expanded = indices_a.unsqueeze(1).expand(-1, bodies.shape[1])
+  indices_b_expanded = indices_b.unsqueeze(1).expand(-1, bodies.shape[1])
+  bodies_a = bodies.gather(0, indices_a_expanded)
+  bodies_b = bodies.gather(0, indices_b_expanded)
+  
+  # Extract data for body A (first in each pair)
+  pos_a = bodies_a[:, BodySchema.POS_X:BodySchema.POS_Z+1]
+  vel_a = bodies_a[:, BodySchema.VEL_X:BodySchema.VEL_Z+1]
+  ang_vel_a = bodies_a[:, BodySchema.ANG_VEL_X:BodySchema.ANG_VEL_Z+1]
+  inv_mass_a = bodies_a[:, BodySchema.INV_MASS]
+  quat_a = bodies_a[:, BodySchema.QUAT_W:BodySchema.QUAT_Z+1]
+  inv_inertia_local_a = bodies_a[:, BodySchema.INV_INERTIA_XX:BodySchema.INV_INERTIA_ZZ+1]
+  
+  # Extract data for body B (second in each pair)
+  pos_b = bodies_b[:, BodySchema.POS_X:BodySchema.POS_Z+1]
+  vel_b = bodies_b[:, BodySchema.VEL_X:BodySchema.VEL_Z+1]
+  ang_vel_b = bodies_b[:, BodySchema.ANG_VEL_X:BodySchema.ANG_VEL_Z+1]
+  inv_mass_b = bodies_b[:, BodySchema.INV_MASS]
+  quat_b = bodies_b[:, BodySchema.QUAT_W:BodySchema.QUAT_Z+1]
+  inv_inertia_local_b = bodies_b[:, BodySchema.INV_INERTIA_XX:BodySchema.INV_INERTIA_ZZ+1]
   
   # Transform inverse inertias to world space
-  inv_inertias_world = get_world_inv_inertia(Tensor(quats), Tensor(inv_inertias_local)).numpy()
+  inv_I_world_a = get_world_inv_inertia(quat_a, inv_inertia_local_a).reshape(-1, 3, 3)
+  inv_I_world_b = get_world_inv_inertia(quat_b, inv_inertia_local_b).reshape(-1, 3, 3)
   
-  for contact in contacts:
-    idx_i, idx_j = contact.pair_indices
-    normal, point, depth = contact.normal, contact.point, contact.depth
-    
-    # Skip if both bodies are static
-    inv_mass_i, inv_mass_j = inv_masses[idx_i], inv_masses[idx_j]
-    if inv_mass_i + inv_mass_j < 1e-7: continue
-    
-    # Get body properties
-    vel_i, vel_j = velocities[idx_i], velocities[idx_j]
-    ang_vel_i, ang_vel_j = ang_velocities[idx_i], ang_velocities[idx_j]
-    inv_I_i, inv_I_j = inv_inertias_world[idx_i].reshape(3, 3), inv_inertias_world[idx_j].reshape(3, 3)
-    pos_i, pos_j = positions[idx_i], positions[idx_j]
-    
-    # Calculate relative velocity at contact point
-    # v_contact = v_center + ω × r
-    r_i, r_j = point - pos_i, point - pos_j
-    v_rel = (vel_i + np.cross(ang_vel_i, r_i)) - (vel_j + np.cross(ang_vel_j, r_j))
-    v_rel_normal = np.dot(v_rel, normal)
-    
-    # Skip if bodies are separating
-    if v_rel_normal > 0: continue
-    
-    # Calculate and apply impulse
-    j = calculate_impulse_magnitude(inv_mass_i, inv_mass_j, inv_I_i, inv_I_j, 
-                                   r_i, r_j, normal, v_rel_normal, restitution)
-    impulse_vec = j * normal
-    
-    # Update velocities (Δv = j/m, Δω = I^(-1) * (r × j))
-    velocities[idx_i] += impulse_vec * inv_mass_i
-    velocities[idx_j] -= impulse_vec * inv_mass_j
-    ang_velocities[idx_i] += inv_I_i @ np.cross(r_i, impulse_vec)
-    ang_velocities[idx_j] -= inv_I_j @ np.cross(r_j, impulse_vec)
-    
-    # Position correction (Baumgarte stabilization)
-    # Push bodies apart by a fraction of penetration depth
-    correction_percent = 0.2  # How much penetration to fix per frame
-    slop = 0.01  # Allowed penetration to prevent jitter
-    correction_amount = max(depth - slop, 0.0) / (inv_mass_i + inv_mass_j) * correction_percent
-    correction_vec = correction_amount * normal
-    positions[idx_i] += correction_vec * inv_mass_i
-    positions[idx_j] -= correction_vec * inv_mass_j
+  # Calculate relative positions from centers to contact points
+  r_a = contact_points - pos_a  # (M, 3)
+  r_b = contact_points - pos_b  # (M, 3)
   
-  # Update state tensor
-  bodies_np[:, BodySchema.POS_X:BodySchema.POS_Z+1] = positions
-  bodies_np[:, BodySchema.VEL_X:BodySchema.VEL_Z+1] = velocities
-  bodies_np[:, BodySchema.ANG_VEL_X:BodySchema.ANG_VEL_Z+1] = ang_velocities
-  return Tensor(bodies_np)
+  # Calculate relative velocity at contact points
+  # v_contact = v_center + ω × r
+  v_contact_a = vel_a + cross_product(ang_vel_a, r_a)
+  v_contact_b = vel_b + cross_product(ang_vel_b, r_b)
+  v_rel = v_contact_a - v_contact_b  # (M, 3)
+  
+  # Project relative velocity onto normal
+  v_rel_normal = (v_rel * contact_normals).sum(axis=1)  # (M,)
+  
+  # Skip contacts that are separating (v_rel_normal > 0)
+  active_mask = contact_mask & (v_rel_normal <= 0)
+  active_mask_3d = active_mask.unsqueeze(1).expand(-1, 3)
+  
+  # Calculate impulse magnitudes for all contacts
+  # j = -(1 + e) * v_rel·n / (1/m_a + 1/m_b + n·((I_a^-1 * (r_a × n)) × r_a) + n·((I_b^-1 * (r_b × n)) × r_b))
+  
+  # Cross products for angular terms
+  r_cross_n_a = cross_product(r_a, contact_normals.expand(n_contacts, -1))  # (M, 3)
+  r_cross_n_b = cross_product(r_b, contact_normals.expand(n_contacts, -1))  # (M, 3)
+  
+  # Angular velocity changes: I^-1 * (r × n)
+  ang_delta_a = (inv_I_world_a @ r_cross_n_a.unsqueeze(-1)).squeeze(-1)  # (M, 3)
+  ang_delta_b = (inv_I_world_b @ r_cross_n_b.unsqueeze(-1)).squeeze(-1)  # (M, 3)
+  
+  # Angular terms in denominator: n · (ang_delta × r)
+  angular_term_a = (contact_normals * cross_product(ang_delta_a, r_a)).sum(axis=1)
+  angular_term_b = (contact_normals * cross_product(ang_delta_b, r_b)).sum(axis=1)
+  
+  # Calculate impulse magnitudes
+  numerator = -(1 + restitution) * v_rel_normal
+  denominator = inv_mass_a + inv_mass_b + angular_term_a + angular_term_b
+  denominator = denominator.maximum(1e-6)  # Prevent division by zero
+  j_magnitude = numerator / denominator
+  
+  # Apply active mask
+  j_magnitude = j_magnitude * active_mask.float()
+  
+  # Calculate impulse vectors
+  impulse_vectors = j_magnitude.unsqueeze(1) * contact_normals  # (M, 3)
+  
+  # Calculate velocity changes
+  delta_vel_a = impulse_vectors * inv_mass_a.unsqueeze(1)  # (M, 3)
+  delta_vel_b = -impulse_vectors * inv_mass_b.unsqueeze(1)  # (M, 3)
+  
+  # Calculate angular velocity changes
+  delta_ang_vel_a = (inv_I_world_a @ cross_product(r_a, impulse_vectors).unsqueeze(-1)).squeeze(-1)
+  delta_ang_vel_b = -(inv_I_world_b @ cross_product(r_b, impulse_vectors).unsqueeze(-1)).squeeze(-1)
+  
+  # Position correction (Baumgarte stabilization)
+  correction_percent = 0.2
+  slop = 0.01
+  correction_amount = ((contact_depths - slop).maximum(0.0) / (inv_mass_a + inv_mass_b).maximum(1e-6) * correction_percent)
+  correction_vec = correction_amount.unsqueeze(1) * contact_normals * active_mask_3d.float()
+  
+  delta_pos_a = correction_vec * inv_mass_a.unsqueeze(1)
+  delta_pos_b = -correction_vec * inv_mass_b.unsqueeze(1)
+  
+  # Now we need to scatter the changes back to the bodies tensor
+  # We'll use scatter operations to accumulate the changes
+  
+  # Create full delta tensors
+  delta_bodies = Tensor.zeros_like(bodies)
+  
+  # Prepare indices for scattering
+  # We need to flatten the multi-dimensional updates
+  n_bodies = bodies.shape[0]
+  
+  # For positions (3 components per body)
+  pos_indices_a = indices_a.unsqueeze(1).expand(-1, 3) * BodySchema.NUM_PROPERTIES + \
+                   Tensor.arange(BodySchema.POS_X, BodySchema.POS_Z+1).unsqueeze(0)
+  pos_indices_b = indices_b.unsqueeze(1).expand(-1, 3) * BodySchema.NUM_PROPERTIES + \
+                   Tensor.arange(BodySchema.POS_X, BodySchema.POS_Z+1).unsqueeze(0)
+  
+  # For velocities (3 components per body)
+  vel_indices_a = indices_a.unsqueeze(1).expand(-1, 3) * BodySchema.NUM_PROPERTIES + \
+                   Tensor.arange(BodySchema.VEL_X, BodySchema.VEL_Z+1).unsqueeze(0)
+  vel_indices_b = indices_b.unsqueeze(1).expand(-1, 3) * BodySchema.NUM_PROPERTIES + \
+                   Tensor.arange(BodySchema.VEL_X, BodySchema.VEL_Z+1).unsqueeze(0)
+  
+  # For angular velocities (3 components per body)
+  ang_vel_indices_a = indices_a.unsqueeze(1).expand(-1, 3) * BodySchema.NUM_PROPERTIES + \
+                       Tensor.arange(BodySchema.ANG_VEL_X, BodySchema.ANG_VEL_Z+1).unsqueeze(0)
+  ang_vel_indices_b = indices_b.unsqueeze(1).expand(-1, 3) * BodySchema.NUM_PROPERTIES + \
+                       Tensor.arange(BodySchema.ANG_VEL_X, BodySchema.ANG_VEL_Z+1).unsqueeze(0)
+  
+  # Flatten the bodies and delta arrays for scatter
+  bodies_flat = bodies.flatten()
+  delta_flat = Tensor.zeros_like(bodies_flat)
+  
+  # Scatter position changes
+  delta_flat = delta_flat.scatter_reduce(0, pos_indices_a.flatten(), delta_pos_a.flatten(), "sum")
+  delta_flat = delta_flat.scatter_reduce(0, pos_indices_b.flatten(), delta_pos_b.flatten(), "sum")
+  
+  # Scatter velocity changes
+  delta_flat = delta_flat.scatter_reduce(0, vel_indices_a.flatten(), delta_vel_a.flatten(), "sum")
+  delta_flat = delta_flat.scatter_reduce(0, vel_indices_b.flatten(), delta_vel_b.flatten(), "sum")
+  
+  # Scatter angular velocity changes
+  delta_flat = delta_flat.scatter_reduce(0, ang_vel_indices_a.flatten(), delta_ang_vel_a.flatten(), "sum")
+  delta_flat = delta_flat.scatter_reduce(0, ang_vel_indices_b.flatten(), delta_ang_vel_b.flatten(), "sum")
+  
+  # Reshape back and apply the accumulated changes
+  delta_bodies = delta_flat.reshape(bodies.shape)
+  return bodies + delta_bodies
+
+def cross_product(a: Tensor, b: Tensor) -> Tensor:
+  """Compute cross product of two 3D vector tensors.
+  
+  Args:
+    a, b: Tensors of shape (..., 3)
+    
+  Returns:
+    Cross product tensor of shape (..., 3)
+  """
+  # a × b = [a_y*b_z - a_z*b_y, a_z*b_x - a_x*b_z, a_x*b_y - a_y*b_x]
+  ax, ay, az = a[..., 0:1], a[..., 1:2], a[..., 2:3]
+  bx, by, bz = b[..., 0:1], b[..., 1:2], b[..., 2:3]
+  
+  cx = ay * bz - az * by
+  cy = az * bx - ax * bz
+  cz = ax * by - ay * bx
+  
+  return Tensor.cat(cx, cy, cz, dim=-1)

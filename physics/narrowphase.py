@@ -4,98 +4,18 @@ After broadphase identifies potentially colliding pairs, narrowphase performs
 exact geometric tests to determine if bodies are actually colliding and
 generates contact points with normals and penetration depths.
 
-Supported collision tests:
-- Sphere vs Sphere: Distance between centers vs sum of radii
-- Sphere vs Box: Closest point on box to sphere center
-- Box vs Box: Not implemented (requires SAT or GJK)
-- Capsule collisions: Not implemented
-
-Contact information includes:
-- Contact point: Where bodies touch in world space
-- Contact normal: Direction to separate bodies (from B to A)
-- Penetration depth: How much bodies overlap
-
-This information is used by the solver to calculate impulses that separate
-the bodies and simulate realistic collisions.
+This implementation is fully vectorized and JIT-compatible, operating on
+all collision pairs simultaneously without Python loops.
 """
-import numpy as np
-from tinygrad import Tensor
-from .types import BodySchema, ShapeType, Contact
-from .math_utils import quat_to_rotmat_np
+from tinygrad import Tensor, dtypes
+from .types import BodySchema, ShapeType
+from .math_utils import quat_to_rotmat
 
-def sphere_sphere_collision(pos_i: np.ndarray, radius_i: float, 
-                           pos_j: np.ndarray, radius_j: float) -> Contact | None:
-  """Test collision between two spheres.
-  
-  Two spheres collide when the distance between their centers is less than
-  the sum of their radii. The contact point lies on the line between centers.
-  
-  Args:
-    pos_i, pos_j: Sphere center positions
-    radius_i, radius_j: Sphere radii
-    
-  Returns:
-    Contact if collision detected, None otherwise
-  """
-  delta = pos_i - pos_j
-  dist_sq = np.dot(delta, delta)
-  radii_sum = radius_i + radius_j
-  
-  if dist_sq < radii_sum * radii_sum:
-    dist = np.sqrt(dist_sq)
-    # Normal points from j to i (direction to separate the spheres)
-    normal = delta / dist if dist > 1e-6 else np.array([0, 1, 0])
-    # Contact point is on sphere j's surface along the line to sphere i
-    point = pos_j + delta * (radius_j / radii_sum)
-    depth = radii_sum - dist
-    return Contact(pair_indices=(0, 0), normal=normal, depth=depth, point=point)  # Indices set by caller
-  return None
-
-def sphere_box_collision(sphere_pos: np.ndarray, sphere_radius: float,
-                        box_pos: np.ndarray, box_quat: np.ndarray, 
-                        box_half_extents: np.ndarray) -> Contact | None:
-  """Test collision between a sphere and an oriented box.
-  
-  Algorithm:
-  1. Transform sphere center to box's local space
-  2. Find closest point on axis-aligned box to sphere center
-  3. Check if distance to closest point is less than sphere radius
-  4. Transform contact info back to world space
-  
-  Args:
-    sphere_pos: Sphere center in world space
-    sphere_radius: Sphere radius
-    box_pos: Box center in world space
-    box_quat: Box orientation quaternion
-    box_half_extents: Box half-dimensions along local axes
-    
-  Returns:
-    Contact if collision detected, None otherwise
-  """
-  # Transform sphere to box's local space
-  rot_box_inv = quat_to_rotmat_np(np.array([box_quat]))[0].T
-  sphere_center_local = rot_box_inv @ (sphere_pos - box_pos)
-  
-  # Clamp to box bounds to find closest point
-  closest_point_local = np.maximum(-box_half_extents, np.minimum(box_half_extents, sphere_center_local))
-  
-  # Check collision
-  delta_local = sphere_center_local - closest_point_local
-  dist_sq = np.dot(delta_local, delta_local)
-  
-  if dist_sq < sphere_radius * sphere_radius:
-    # Transform back to world space
-    rot_box = rot_box_inv.T
-    closest_point_world = box_pos + rot_box @ closest_point_local
-    dist = np.sqrt(dist_sq)
-    # Normal points from box to sphere (direction to push sphere out)
-    normal = rot_box @ (delta_local / dist) if dist > 1e-6 else rot_box @ np.array([0, 1, 0])
-    depth = sphere_radius - dist
-    return Contact(pair_indices=(0, 0), normal=normal, depth=depth, point=closest_point_world)
-  return None
-
-def narrowphase(bodies: Tensor, pair_indices: Tensor, collision_mask: Tensor) -> list[Contact]:
+def narrowphase(bodies: Tensor, pair_indices: Tensor, collision_mask: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
   """Perform exact collision detection on potentially colliding pairs.
+  
+  This function is fully vectorized and operates on all pairs simultaneously.
+  Invalid pairs (where collision_mask is False) will have zeroed outputs.
   
   Args:
     bodies: State tensor of shape (N, NUM_PROPERTIES)
@@ -103,46 +23,164 @@ def narrowphase(bodies: Tensor, pair_indices: Tensor, collision_mask: Tensor) ->
     collision_mask: Boolean tensor of shape (M,) indicating which pairs have overlapping AABBs
     
   Returns:
-    List of Contact objects with collision information
+    Tuple of tensors:
+    - contact_normals: (M, 3) Normal vectors pointing from body j to body i
+    - contact_depths: (M,) Penetration depths
+    - contact_points: (M, 3) Contact points in world space
+    - contact_mask: (M,) Boolean mask indicating valid contacts
+    - pair_indices: (M, 2) Same as input, for convenience
   """
-  # Filter to only pairs with overlapping AABBs
-  mask_np = collision_mask.numpy()
-  if not mask_np.any(): return []
+  n_pairs = pair_indices.shape[0]
   
-  bodies_np = bodies.numpy()
-  pair_indices_np = pair_indices.numpy()
+  # If no pairs, return empty tensors
+  if n_pairs == 0:
+    return (Tensor.zeros((0, 3)), Tensor.zeros((0,)), Tensor.zeros((0, 3)), 
+            Tensor.zeros((0,)).cast(dtypes.bool), pair_indices)
   
-  # Ensure mask has same length as pair_indices
-  if len(mask_np) != len(pair_indices_np):
-    print(f"Warning: mask length {len(mask_np)} != pair_indices length {len(pair_indices_np)}")
-    return []
-    
-  active_pairs = pair_indices_np[mask_np]
-  contacts = []
+  # Gather body data for all pairs using pure tensor operations
+  indices_a = pair_indices[:, 0]
+  indices_b = pair_indices[:, 1]
   
-  # Extract relevant data for all bodies
-  positions = bodies_np[:, BodySchema.POS_X:BodySchema.POS_Z+1]
-  quats = bodies_np[:, BodySchema.QUAT_W:BodySchema.QUAT_Z+1]
-  shape_types = bodies_np[:, BodySchema.SHAPE_TYPE].astype(int)
-  shape_params = bodies_np[:, BodySchema.SHAPE_PARAM_1:BodySchema.SHAPE_PARAM_3+1]
+  # Gather full body data for each pair
+  # We need to expand indices to match the shape of bodies
+  indices_a_expanded = indices_a.unsqueeze(1).expand(-1, bodies.shape[1])
+  indices_b_expanded = indices_b.unsqueeze(1).expand(-1, bodies.shape[1])
+  bodies_a = bodies.gather(0, indices_a_expanded)
+  bodies_b = bodies.gather(0, indices_b_expanded)
   
-  for i, j in active_pairs:
-    type_i, type_j = shape_types[i], shape_types[j]
-    
-    # Sphere vs Sphere
-    if type_i == ShapeType.SPHERE and type_j == ShapeType.SPHERE:
-      contact = sphere_sphere_collision(positions[i], shape_params[i, 0], 
-                                       positions[j], shape_params[j, 0])
-      if contact:
-        contacts.append(Contact((i, j), contact.normal, contact.depth, contact.point))
-    
-    # Sphere vs Box (ensure sphere is first)
-    elif (type_i == ShapeType.SPHERE and type_j == ShapeType.BOX) or (type_i == ShapeType.BOX and type_j == ShapeType.SPHERE):
-      if type_i == ShapeType.BOX: i, j = j, i  # Swap so sphere is i
-      contact = sphere_box_collision(positions[i], shape_params[i, 0],
-                                    positions[j], quats[j], shape_params[j])
-      if contact:
-        contacts.append(Contact((i, j), contact.normal, contact.depth, contact.point))
+  # Extract data for body A (first in each pair)
+  pos_a = bodies_a[:, BodySchema.POS_X:BodySchema.POS_Z+1]
+  quat_a = bodies_a[:, BodySchema.QUAT_W:BodySchema.QUAT_Z+1]
+  shape_type_a = bodies_a[:, BodySchema.SHAPE_TYPE]
+  shape_params_a = bodies_a[:, BodySchema.SHAPE_PARAM_1:BodySchema.SHAPE_PARAM_3+1]
   
-  if contacts: print(f"Narrowphase generated {len(contacts)} contacts.")
-  return contacts
+  # Extract data for body B (second in each pair)
+  pos_b = bodies_b[:, BodySchema.POS_X:BodySchema.POS_Z+1]
+  quat_b = bodies_b[:, BodySchema.QUAT_W:BodySchema.QUAT_Z+1]
+  shape_type_b = bodies_b[:, BodySchema.SHAPE_TYPE]
+  shape_params_b = bodies_b[:, BodySchema.SHAPE_PARAM_1:BodySchema.SHAPE_PARAM_3+1]
+  
+  # Initialize outputs
+  contact_normals = Tensor.zeros((n_pairs, 3))
+  contact_depths = Tensor.zeros((n_pairs,))
+  contact_points = Tensor.zeros((n_pairs, 3))
+  contact_mask = Tensor.zeros((n_pairs,)).cast(dtypes.bool)
+  
+  # Sphere-Sphere collision detection (vectorized)
+  is_sphere_sphere = ((shape_type_a == ShapeType.SPHERE) & (shape_type_b == ShapeType.SPHERE)).float()
+  
+  # Always compute sphere-sphere collisions (masked later)
+  # Extract radii
+  radius_a = shape_params_a[:, 0:1]  # Keep dimension for broadcasting
+  radius_b = shape_params_b[:, 0:1]
+  
+  # Compute collision info for all sphere pairs
+  delta = pos_a - pos_b  # Vector from B to A
+  dist_sq = (delta * delta).sum(axis=1, keepdim=True)
+  dist = dist_sq.sqrt()
+  radii_sum = radius_a + radius_b
+  
+  # Check collision
+  sphere_collision = (dist < radii_sum).float()
+  
+  # Compute contact normal (direction from B to A)
+  # Handle zero distance case by using default up vector
+  safe_dist = dist.maximum(1e-6)
+  normal = delta / safe_dist
+  
+  # Contact point on sphere B's surface
+  point = pos_b + delta * (radius_b / radii_sum)
+  
+  # Penetration depth
+  depth = (radii_sum - dist).squeeze()
+  
+  # Apply mask for sphere-sphere pairs that are actually colliding
+  sphere_mask = is_sphere_sphere * sphere_collision.squeeze() * collision_mask.float()
+  sphere_mask_3d = sphere_mask.unsqueeze(1).expand(-1, 3)
+  
+  # Update outputs using masks
+  contact_normals = contact_normals + sphere_mask_3d * normal
+  contact_depths = contact_depths + sphere_mask * depth
+  contact_points = contact_points + sphere_mask_3d * point
+  contact_mask = contact_mask | (sphere_mask > 0)
+  
+  # Sphere-Box collision detection (vectorized)
+  # Handle both orderings: (sphere, box) and (box, sphere)
+  is_sphere_box = ((shape_type_a == ShapeType.SPHERE) & (shape_type_b == ShapeType.BOX)).float()
+  is_box_sphere = ((shape_type_a == ShapeType.BOX) & (shape_type_b == ShapeType.SPHERE)).float()
+  
+  # Process sphere-box (sphere is A, box is B)
+  # Get box rotation matrices and their inverses
+  rot_box_b = quat_to_rotmat(quat_b)  # (M, 3, 3)
+  rot_box_inv_b = rot_box_b.transpose(-1, -2)  # (M, 3, 3)
+  
+  # Transform sphere center to box local space
+  delta_world_sb = pos_a - pos_b  # (M, 3)
+  sphere_local_sb = (rot_box_inv_b @ delta_world_sb.unsqueeze(-1)).squeeze(-1)  # (M, 3)
+  
+  # Clamp to box bounds to find closest point
+  closest_local_sb = sphere_local_sb.clip(-shape_params_b, shape_params_b)
+  
+  # Check collision
+  delta_local_sb = sphere_local_sb - closest_local_sb
+  dist_sq_sb = (delta_local_sb * delta_local_sb).sum(axis=1)
+  dist_sb = dist_sq_sb.sqrt()
+  
+  # Collision occurs when distance < radius
+  sphere_radius_a = shape_params_a[:, 0]
+  box_collision_sb = (dist_sb < sphere_radius_a).float()
+  
+  # Transform closest point back to world space
+  closest_world_sb = pos_b + (rot_box_b @ closest_local_sb.unsqueeze(-1)).squeeze(-1)
+  
+  # Compute normal (from box to sphere)
+  safe_dist_sb = dist_sb.maximum(1e-6).unsqueeze(1)
+  normal_local_sb = delta_local_sb / safe_dist_sb
+  normal_world_sb = (rot_box_b @ normal_local_sb.unsqueeze(-1)).squeeze(-1)
+  
+  # Penetration depth
+  depth_sb = sphere_radius_a - dist_sb
+  
+  # Apply masks for sphere-box
+  combined_mask_sb = is_sphere_box * box_collision_sb * collision_mask.float()
+  combined_mask_3d_sb = combined_mask_sb.unsqueeze(1).expand(-1, 3)
+  
+  # Update outputs
+  contact_normals = contact_normals + combined_mask_3d_sb * normal_world_sb
+  contact_depths = contact_depths + combined_mask_sb * depth_sb
+  contact_points = contact_points + combined_mask_3d_sb * closest_world_sb
+  contact_mask = contact_mask | (combined_mask_sb > 0)
+  
+  # Process box-sphere (box is A, sphere is B) - similar logic but swapped
+  rot_box_a = quat_to_rotmat(quat_a)  # (M, 3, 3)
+  rot_box_inv_a = rot_box_a.transpose(-1, -2)  # (M, 3, 3)
+  
+  delta_world_bs = pos_b - pos_a  # (M, 3)
+  sphere_local_bs = (rot_box_inv_a @ delta_world_bs.unsqueeze(-1)).squeeze(-1)  # (M, 3)
+  
+  closest_local_bs = sphere_local_bs.clip(-shape_params_a, shape_params_a)
+  
+  delta_local_bs = sphere_local_bs - closest_local_bs
+  dist_sq_bs = (delta_local_bs * delta_local_bs).sum(axis=1)
+  dist_bs = dist_sq_bs.sqrt()
+  
+  sphere_radius_b = shape_params_b[:, 0]
+  box_collision_bs = (dist_bs < sphere_radius_b).float()
+  
+  closest_world_bs = pos_a + (rot_box_a @ closest_local_bs.unsqueeze(-1)).squeeze(-1)
+  
+  safe_dist_bs = dist_bs.maximum(1e-6).unsqueeze(1)
+  normal_local_bs = delta_local_bs / safe_dist_bs
+  normal_world_bs = -(rot_box_a @ normal_local_bs.unsqueeze(-1)).squeeze(-1)  # Flip normal
+  
+  depth_bs = sphere_radius_b - dist_bs
+  
+  combined_mask_bs = is_box_sphere * box_collision_bs * collision_mask.float()
+  combined_mask_3d_bs = combined_mask_bs.unsqueeze(1).expand(-1, 3)
+  
+  contact_normals = contact_normals + combined_mask_3d_bs * normal_world_bs
+  contact_depths = contact_depths + combined_mask_bs * depth_bs
+  contact_points = contact_points + combined_mask_3d_bs * closest_world_bs
+  contact_mask = contact_mask | (combined_mask_bs > 0)
+  
+  return contact_normals, contact_depths, contact_points, contact_mask, pair_indices

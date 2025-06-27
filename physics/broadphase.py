@@ -21,7 +21,7 @@ This will be replaced with a GPU-parallel sort in Phase 2 (WGSL kernel).
 import numpy as np
 from tinygrad import Tensor
 from .types import BodySchema, ShapeType
-from .math_utils import quat_to_rotmat_np, quat_to_rotmat
+from .math_utils import quat_to_rotmat
 
 def compute_aabb(position: np.ndarray, rotation: np.ndarray, shape_type: int, 
                  shape_params: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -71,7 +71,21 @@ def broadphase_sweep_and_prune(bodies: Tensor) -> Tensor:
   shape_params = bodies_np[:, BodySchema.SHAPE_PARAM_1:BodySchema.SHAPE_PARAM_3+1]
   
   # Compute rotation matrices and AABBs for all bodies
-  rot_matrices = quat_to_rotmat_np(quats)
+  # Convert quaternions to rotation matrices using numpy operations
+  w, x, y, z = quats[:, 0], quats[:, 1], quats[:, 2], quats[:, 3]
+  x2, y2, z2 = x*x, y*y, z*z
+  wx, wy, wz = w*x, w*y, w*z
+  xy, xz, yz = x*y, x*z, y*z
+  rot_matrices = np.zeros((quats.shape[0], 3, 3))
+  rot_matrices[:, 0, 0] = 1 - 2*(y2 + z2)
+  rot_matrices[:, 0, 1] = 2*(xy - wz)
+  rot_matrices[:, 0, 2] = 2*(xz + wy)
+  rot_matrices[:, 1, 0] = 2*(xy + wz)
+  rot_matrices[:, 1, 1] = 1 - 2*(x2 + z2)
+  rot_matrices[:, 1, 2] = 2*(yz - wx)
+  rot_matrices[:, 2, 0] = 2*(xz - wy)
+  rot_matrices[:, 2, 1] = 2*(yz + wx)
+  rot_matrices[:, 2, 2] = 1 - 2*(x2 + y2)
   min_pts, max_pts = np.zeros_like(positions), np.zeros_like(positions)
   
   # Compute AABBs for each shape type in batch where possible

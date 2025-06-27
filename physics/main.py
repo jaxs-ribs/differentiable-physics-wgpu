@@ -3,7 +3,7 @@
 import argparse
 import numpy as np
 from .types import create_body_array, ShapeType
-from .engine import PhysicsEngine
+from .engine import TensorPhysicsEngine
 
 def create_test_scene() -> list[np.ndarray]:
   """Create a simple test scene with a ground box and falling sphere."""
@@ -40,32 +40,70 @@ def main():
   parser.add_argument('--steps', type=int, default=200, help='Number of simulation steps')
   parser.add_argument('--output', type=str, default='artifacts/oracle_dump.npy', help='Output numpy file')
   parser.add_argument('--dt', type=float, default=0.016, help='Timestep in seconds')
+  parser.add_argument('--mode', type=str, default='nstep', choices=['single', 'nstep'], 
+                      help='Simulation mode: single-step or n-step JIT')
+  parser.add_argument('--save-intermediate', action='store_true', 
+                      help='Save intermediate frames (only for single-step mode)')
   args = parser.parse_args()
   
   # Create physics engine and scene
-  engine = PhysicsEngine(dt=args.dt)
   bodies = create_test_scene()
-  engine.set_bodies(bodies)
+  bodies_array = np.stack(bodies)
+  engine = TensorPhysicsEngine(bodies_array, dt=args.dt)
   
-  # Run simulation and collect states
-  all_states = []
-  print(f"Running simulation for {args.steps} steps (dt={args.dt}s)...")
+  # Run simulation based on mode
+  if args.mode == 'nstep':
+    print(f"Running N-step JIT simulation for {args.steps} steps (dt={args.dt}s)...")
+    
+    # Capture initial state
+    initial_state = engine.get_state()
+    
+    # Run the entire simulation as a single JIT-compiled operation
+    engine.run_simulation(args.steps)
+    
+    # Get final state
+    final_state = engine.get_state()
+    
+    # For N-step mode, we only save initial and final states
+    all_states = [initial_state, final_state]
+  else:  # single-step mode
+    print(f"Running single-step simulation for {args.steps} steps (dt={args.dt}s)...")
+    all_states = []
+    
+    if args.save_intermediate:
+      # Save all intermediate states
+      for i in range(args.steps + 1):  # +1 to include initial state
+        if i % 20 == 0: print(f"  Step {i}...")
+        if i > 0:
+          engine.step()
+        all_states.append(engine.get_state())
+    else:
+      # Only save initial and final states
+      initial_state = engine.get_state()
+      for i in range(args.steps):
+        if i % 20 == 0: print(f"  Step {i}...")
+        engine.step()
+      final_state = engine.get_state()
+      all_states = [initial_state, final_state]
   
-  for i in range(args.steps):
-    if i % 20 == 0: print(f"  Step {i}...")
-    engine.step()
-    all_states.append(engine.get_state())
-  
-  # Save to numpy file
   state_array = np.array(all_states)
   # Ensure output directory exists
   import os
   os.makedirs(os.path.dirname(args.output), exist_ok=True)
   np.save(args.output, state_array)
   
-  print(f"\nCreated {args.output} with {len(bodies)} bodies over {args.steps} frames.")
+  print(f"\nCreated {args.output} with {len(bodies)} bodies.")
   print(f"State array shape: {state_array.shape}")
-  print(f"Each frame contains {len(bodies)} bodies with {state_array.shape[2]} properties each.")
+  if args.mode == 'nstep':
+    print(f"Simulation ran {args.steps} steps as a single JIT-compiled operation.")
+    print("(Saved initial and final states only)")
+  else:
+    if args.save_intermediate:
+      print(f"Simulation ran {args.steps} steps in single-step mode with all frames saved.")
+    else:
+      print(f"Simulation ran {args.steps} steps in single-step mode.")
+      print("(Saved initial and final states only)")
+  print(f"Each state contains {len(bodies)} bodies with {state_array.shape[2]} properties each.")
 
 if __name__ == "__main__":
   main()
