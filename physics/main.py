@@ -38,7 +38,7 @@ def create_test_scene() -> list[np.ndarray]:
 def main():
   parser = argparse.ArgumentParser(description='Physics engine simulation with numpy dump output.')
   parser.add_argument('--steps', type=int, default=200, help='Number of simulation steps')
-  parser.add_argument('--output', type=str, default='oracle_dump.npy', help='Output numpy file')
+  parser.add_argument('--output', type=str, default='artifacts/oracle_dump.npy', help='Output numpy file')
   parser.add_argument('--dt', type=float, default=0.016, help='Timestep in seconds')
   args = parser.parse_args()
   
@@ -58,6 +58,9 @@ def main():
   
   # Save to numpy file
   state_array = np.array(all_states)
+  # Ensure output directory exists
+  import os
+  os.makedirs(os.path.dirname(args.output), exist_ok=True)
   np.save(args.output, state_array)
   
   print(f"\nCreated {args.output} with {len(bodies)} bodies over {args.steps} frames.")
