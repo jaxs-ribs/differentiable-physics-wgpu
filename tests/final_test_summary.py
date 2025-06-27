@@ -3,7 +3,15 @@
 
 import subprocess
 import sys
+import os
 from pathlib import Path
+
+# Add parent directory and tinygrad to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+tinygrad_path = os.path.join(parent_dir, "external", "tinygrad")
+if os.path.exists(tinygrad_path):
+    sys.path.insert(0, tinygrad_path)
 
 # Color codes
 GREEN = '\033[92m'
@@ -15,7 +23,19 @@ RESET = '\033[0m'
 def run_test(cmd, description):
     """Run a test and return status."""
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        # Set up environment with proper paths
+        env = os.environ.copy()
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tinygrad_path = os.path.join(parent_dir, "external", "tinygrad")
+        
+        # Add to PYTHONPATH
+        python_path = f"{parent_dir}:{tinygrad_path}"
+        if 'PYTHONPATH' in env:
+            env['PYTHONPATH'] = f"{python_path}:{env['PYTHONPATH']}"
+        else:
+            env['PYTHONPATH'] = python_path
+            
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
         if result.returncode == 0:
             return True, None
         else:

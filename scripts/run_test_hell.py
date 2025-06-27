@@ -12,6 +12,13 @@ from typing import List, Tuple, Optional
 import threading
 import queue
 
+# Add parent directory and tinygrad to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+tinygrad_path = os.path.join(parent_dir, "external", "tinygrad")
+if os.path.exists(tinygrad_path):
+    sys.path.insert(0, tinygrad_path)
+
 @dataclass
 class TestCase:
     name: str

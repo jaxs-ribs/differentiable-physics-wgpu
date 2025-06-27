@@ -15,6 +15,11 @@ import os
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
+# Add tinygrad to path
+tinygrad_path = os.path.join(parent_dir, "external", "tinygrad")
+if os.path.exists(tinygrad_path):
+    sys.path.insert(0, tinygrad_path)
+
 from physics.main import main
 
 if __name__ == "__main__":

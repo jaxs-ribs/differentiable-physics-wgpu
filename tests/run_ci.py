@@ -33,6 +33,11 @@ from pathlib import Path
 physics_core_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, physics_core_path)
 
+# Add tinygrad to path
+tinygrad_path = os.path.join(physics_core_path, "external", "tinygrad")
+if os.path.exists(tinygrad_path):
+    sys.path.insert(0, tinygrad_path)
+
 print(f"[SETUP] Adding physics_core to Python path: {physics_core_path}")
 print(f"[SETUP] Current working directory: {os.getcwd()}")
 print(f"[SETUP] Python version: {sys.version}")
