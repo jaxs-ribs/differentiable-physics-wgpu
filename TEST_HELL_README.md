@@ -1,20 +1,38 @@
 # Test Hell Session
 
-An interactive terminal-based test runner that makes you witness each test before proceeding.
+An interactive terminal-based test runner that automatically runs tests while you watch.
 
 ## Features
 
 - **Welcome Screen**: ASCII art introduction with test count
-- **One Test Per Screen**: Each test gets its own dedicated screen
-- **Live Output Streaming**: Watch test output in real-time as it executes
+- **Auto-Running Tests**: Tests start automatically, no manual triggering needed
+- **One Test Per Screen**: Each test gets its own dedicated screen with:
+  - Test description and docstring preview
+  - Live output streaming with color coding
+  - Progress indicators and spinners
+  - Duration tracking
+- **Enhanced Output**: Tests now include verbose logging showing:
+  - What's being tested and why
+  - Step-by-step progress
+  - Expected vs actual results
+  - Performance metrics
 - **Keyboard Navigation**:
-  - `SPACE` - Run the current test
-  - `N` - Skip to next test
+  - `ENTER` - Continue to next test after completion
   - `P` - Go to previous test
   - `R` - Re-run current test
   - `Q` - Quit at any time
   - `E` - Export results (from summary screen)
-- **Visual Feedback**: Color-coded test status (running, passed, failed, skipped)
+- **Scrolling Controls**:
+  - `↑` / `↓` - Scroll up/down one line
+  - `PgUp` / `PgDn` - Scroll up/down one page
+  - `Home` - Jump to top of output
+  - `End` - Jump to bottom of output
+  - Auto-scrolls to bottom when new output arrives
+- **Visual Feedback**: 
+  - Color-coded test status (running=blue, passed=green, failed=red)
+  - Animated spinner for running tests
+  - Progress bar showing approximate completion
+  - Syntax highlighting for output (errors, success, warnings)
 - **Summary Screen**: Final results with category breakdown
 - **Export Function**: Save detailed results to timestamped file
 
@@ -50,13 +68,22 @@ Results can be exported to a timestamped text file containing:
 - Summary statistics
 - Detailed results for each test including output
 
+## What's New
+
+- **Scrollable Output**: Full scrolling support with arrow keys, page up/down, home/end
+- **Docstring Display**: Each test shows its purpose and description from the module docstring
+- **Auto-Run**: Tests start automatically without manual triggering
+- **Enhanced Logging**: All tests now include verbose output showing progress and details
+- **Better Visual Feedback**: Scroll indicators, progress bars, and color-coded output
+
 ## Implementation Details
 
 - Uses Python's `curses` library for terminal UI
 - Streams test output in real-time using threading
-- Preserves full test output for review
+- Preserves full test output for review with scrolling
 - Color-coded status indicators
 - Responsive to terminal size
+- Extracts and displays module docstrings
 
 ## Why "Hell Session"?
 

@@ -1,5 +1,26 @@
 #!/usr/bin/env python3
-"""Comprehensive CI script for the physics engine."""
+"""
+Comprehensive CI Test Suite for the Physics Engine
+
+This module serves as the main continuous integration (CI) test runner for the physics engine.
+It validates all core functionality including:
+- Module imports and dependencies
+- Basic physics simulation (gravity, collisions)
+- JIT compilation capabilities
+- NumPy-free core module verification
+- Command-line interface testing
+- Performance benchmarking
+
+The test suite is designed to catch regressions early and ensure the physics engine
+maintains correct behavior across different execution modes (single-step vs N-step).
+
+Why this is useful:
+- Provides automated validation of the entire physics engine stack
+- Ensures compatibility with TinyGrad's JIT compilation
+- Verifies that core modules remain NumPy-free for performance
+- Catches integration issues between different components
+- Provides performance baselines to detect slowdowns
+"""
 
 import os
 import sys
@@ -11,6 +32,11 @@ from pathlib import Path
 # Add physics_core to path (parent of tests directory)
 physics_core_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, physics_core_path)
+
+print(f"[SETUP] Adding physics_core to Python path: {physics_core_path}")
+print(f"[SETUP] Current working directory: {os.getcwd()}")
+print(f"[SETUP] Python version: {sys.version}")
+print(f"[SETUP] NumPy version: {np.__version__}")
 
 # Colors for output
 GREEN = '\033[92m'
@@ -65,6 +91,10 @@ def test_imports():
     """Test that all modules can be imported."""
     print_header("Import Tests")
     
+    print("[INFO] This test validates that all core physics modules can be imported successfully.")
+    print("[INFO] Import failures often indicate missing dependencies or syntax errors.")
+    print("")
+    
     modules = [
         'physics.types',
         'physics.math_utils',
@@ -76,36 +106,65 @@ def test_imports():
         'physics.main'
     ]
     
+    print(f"[TEST] Attempting to import {len(modules)} core modules...")
+    
     all_passed = True
-    for module in modules:
+    for i, module in enumerate(modules):
+        print(f"\n[{i+1}/{len(modules)}] Importing module: {module}")
         try:
-            exec(f"import {module}")
+            print(f"  [ATTEMPT] importlib.import_module('{module}')")
+            import importlib
+            imported_module = importlib.import_module(module)
             print_success(f"Import {module}")
+            if hasattr(imported_module, '__file__'):
+                print(f"  [SUCCESS] Module loaded successfully from: {imported_module.__file__}")
+            else:
+                print(f"  [SUCCESS] Module loaded successfully")
         except Exception as e:
             print_error(f"Import {module}: {e}")
+            print(f"  [ERROR] Failed to import module")
+            print(f"  [ERROR] Exception type: {type(e).__name__}")
             all_passed = False
     
+    print(f"\n[SUMMARY] Import test completed: {sum(1 for m in modules if m)} modules checked")
     return all_passed
 
 def test_basic_simulation():
     """Test basic simulation functionality."""
     print_header("Basic Simulation Test")
     
+    print("[INFO] This test validates core physics simulation capabilities.")
+    print("[INFO] It creates a simple scene with a falling sphere and static ground.")
+    print("[INFO] Success indicates gravity, collision detection, and integration work correctly.")
+    print("")
+    
     try:
+        print("[PHASE 1] Importing required modules...")
         from physics.engine import TensorPhysicsEngine
         from physics.types import BodySchema, ShapeType
+        print("  [SUCCESS] Modules imported successfully")
+        
+        print("\n[PHASE 2] Creating test scene...")
+        print("  [INFO] Scene contains:")
+        print("    - 1 static ground box (10x0.5x10 units)")
+        print("    - 1 dynamic sphere (radius 1.0, mass 1.0)")
         
         # Create simple scene
         bodies = np.zeros((2, BodySchema.NUM_PROPERTIES), dtype=np.float32)
         
         # Static ground
+        print("\n  [SETUP] Configuring static ground...")
         bodies[0, BodySchema.POS_Y] = -5.0
         bodies[0, BodySchema.QUAT_W] = 1.0
         bodies[0, BodySchema.SHAPE_TYPE] = ShapeType.BOX
         bodies[0, BodySchema.SHAPE_PARAM_1:BodySchema.SHAPE_PARAM_3+1] = [10.0, 0.5, 10.0]
         bodies[0, BodySchema.INV_MASS] = 0.0
+        print(f"    Position: (0.0, {bodies[0, BodySchema.POS_Y]}, 0.0)")
+        print(f"    Shape: Box with dimensions {bodies[0, BodySchema.SHAPE_PARAM_1:BodySchema.SHAPE_PARAM_3+1]}")
+        print(f"    Mass: Infinite (static body)")
         
         # Falling sphere
+        print("\n  [SETUP] Configuring falling sphere...")
         bodies[1, BodySchema.POS_Y] = 5.0
         bodies[1, BodySchema.QUAT_W] = 1.0
         bodies[1, BodySchema.SHAPE_TYPE] = ShapeType.SPHERE
@@ -114,12 +173,22 @@ def test_basic_simulation():
         bodies[1, BodySchema.INV_INERTIA_XX] = 2.5
         bodies[1, BodySchema.INV_INERTIA_YY] = 2.5
         bodies[1, BodySchema.INV_INERTIA_ZZ] = 2.5
+        print(f"    Position: (0.0, {bodies[1, BodySchema.POS_Y]}, 0.0)")
+        print(f"    Shape: Sphere with radius {bodies[1, BodySchema.SHAPE_PARAM_1]}")
+        print(f"    Mass: {1.0/bodies[1, BodySchema.INV_MASS]}")
         
         # Test single-step
+        print("\n[PHASE 3] Testing single-step simulation...")
+        print("  [INFO] Single-step mode calls step() repeatedly")
         engine = TensorPhysicsEngine(bodies.copy(), dt=0.016)
         initial_y = engine.get_state()[1, BodySchema.POS_Y]
+        print(f"  [INITIAL] Sphere Y position: {initial_y:.4f}")
+        
+        print("  [ACTION] Executing engine.step()...")
         engine.step()
         final_y = engine.get_state()[1, BodySchema.POS_Y]
+        print(f"  [FINAL] Sphere Y position: {final_y:.4f}")
+        print(f"  [DELTA] Position change: {final_y - initial_y:.4f}")
         
         if final_y < initial_y:
             print_success(f"Single-step simulation: sphere fell from {initial_y:.2f} to {final_y:.2f}")
@@ -128,10 +197,18 @@ def test_basic_simulation():
             return False
         
         # Test N-step
+        print("\n[PHASE 4] Testing N-step simulation...")
+        print("  [INFO] N-step mode compiles multiple steps into single operation")
         engine2 = TensorPhysicsEngine(bodies.copy(), dt=0.016)
         initial_y = engine2.get_state()[1, BodySchema.POS_Y]
+        print(f"  [INITIAL] Sphere Y position: {initial_y:.4f}")
+        
+        print("  [ACTION] Executing engine.run_simulation(10)...")
         engine2.run_simulation(10)
         final_y = engine2.get_state()[1, BodySchema.POS_Y]
+        print(f"  [FINAL] Sphere Y position: {final_y:.4f}")
+        print(f"  [DELTA] Position change: {final_y - initial_y:.4f}")
+        print(f"  [INFO] Expected fall distance: ~{0.5 * 9.81 * (10 * 0.016)**2:.4f} (gravity only)")
         
         if final_y < initial_y:
             print_success(f"N-step simulation: sphere fell from {initial_y:.2f} to {final_y:.2f}")
@@ -139,10 +216,12 @@ def test_basic_simulation():
             print_error(f"N-step simulation: sphere didn't fall (y: {initial_y:.2f} -> {final_y:.2f})")
             return False
         
+        print("\n[SUCCESS] Basic simulation test completed successfully")
         return True
         
     except Exception as e:
         print_error(f"Basic simulation test failed: {e}")
+        print("[DEBUG] Full exception traceback:")
         import traceback
         traceback.print_exc()
         return False
@@ -151,36 +230,75 @@ def test_jit_compilation():
     """Test JIT compilation."""
     print_header("JIT Compilation Test")
     
+    print("[INFO] This test validates TinyGrad's JIT compilation of physics operations.")
+    print("[INFO] JIT compilation is crucial for performance, especially on GPUs.")
+    print("[INFO] It compiles Python operations into optimized machine code.")
+    print("")
+    
     try:
+        print("[PHASE 1] Importing required modules...")
         from physics.engine import TensorPhysicsEngine
         from physics.types import BodySchema, ShapeType
         from tinygrad import TinyJit, Tensor
+        print("  [SUCCESS] Modules imported successfully")
+        print(f"  [INFO] TinyJit class location: {TinyJit.__module__}")
         
         # Create test scene
+        print("\n[PHASE 2] Creating minimal test scene...")
         bodies = np.zeros((2, BodySchema.NUM_PROPERTIES), dtype=np.float32)
         bodies[0, BodySchema.QUAT_W] = 1.0
         bodies[1, BodySchema.QUAT_W] = 1.0
         bodies[1, BodySchema.INV_MASS] = 1.0
+        print("  [INFO] Created 2 bodies for JIT testing")
+        print("    - Body 0: Static (inv_mass = 0)")
+        print("    - Body 1: Dynamic (inv_mass = 1)")
         
+        print("\n[PHASE 3] Initializing physics engine...")
         engine = TensorPhysicsEngine(bodies, dt=0.016)
+        print("  [SUCCESS] Engine initialized with dt=0.016 (60 FPS)")
         
         # Test that JIT compilation happened
-        if hasattr(engine, 'jitted_step') and isinstance(engine.jitted_step, TinyJit):
-            print_success("Single-step JIT compilation")
+        print("\n[PHASE 4] Verifying JIT compilation...")
+        
+        print("  [CHECK 1] Testing single-step JIT compilation...")
+        if hasattr(engine, 'jitted_step'):
+            print(f"    [FOUND] jitted_step attribute exists")
+            print(f"    [TYPE] {type(engine.jitted_step)}")
+            if isinstance(engine.jitted_step, TinyJit):
+                print_success("Single-step JIT compilation")
+                print("    [INFO] Single-step operations are JIT-compiled for efficiency")
+            else:
+                print_error("Single-step JIT compilation failed - wrong type")
+                return False
         else:
-            print_error("Single-step JIT compilation failed")
+            print_error("Single-step JIT compilation failed - attribute missing")
+            print("    [ERROR] No jitted_step attribute found on engine")
             return False
             
-        if hasattr(engine, 'jitted_n_step') and isinstance(engine.jitted_n_step, TinyJit):
-            print_success("N-step JIT compilation")
+        print("\n  [CHECK 2] Testing N-step JIT compilation...")
+        if hasattr(engine, 'jitted_n_step'):
+            print(f"    [FOUND] jitted_n_step attribute exists")
+            print(f"    [TYPE] {type(engine.jitted_n_step)}")
+            if isinstance(engine.jitted_n_step, TinyJit):
+                print_success("N-step JIT compilation")
+                print("    [INFO] N-step operations are JIT-compiled for maximum performance")
+            else:
+                print_error("N-step JIT compilation failed - wrong type")
+                return False
         else:
-            print_error("N-step JIT compilation failed")
+            print_error("N-step JIT compilation failed - attribute missing")
+            print("    [ERROR] No jitted_n_step attribute found on engine")
             return False
         
+        print("\n[SUCCESS] JIT compilation test completed successfully")
+        print("[INFO] Both single-step and N-step modes are properly JIT-compiled")
         return True
         
     except Exception as e:
         print_error(f"JIT compilation test failed: {e}")
+        print("[DEBUG] Full exception traceback:")
+        import traceback
+        traceback.print_exc()
         return False
 
 def test_numpy_free():
