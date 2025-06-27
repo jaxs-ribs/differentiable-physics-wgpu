@@ -26,6 +26,7 @@ pub struct DualRenderer {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
+    capture_pipeline: Option<wgpu::RenderPipeline>,
     
     // Oracle (CPU) state buffers and resources
     oracle_line_buffer: wgpu::Buffer,
@@ -109,16 +110,17 @@ impl DualRenderer {
         let render_pipeline = Self::create_render_pipeline(gpu, &shader, &bind_group_layout, config.format);
         
         // Create capture resources if requested
-        let (capture_texture, capture_view, staging_buffer, bytes_per_row) = if enable_capture {
+        let (capture_texture, capture_view, staging_buffer, bytes_per_row, capture_pipeline) = if enable_capture {
             // Calculate aligned bytes per row
             let unpadded_bytes_per_row = config.width * 4; // BGRA8
             let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
             let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
             
-            // Use the same format as the surface for now
-            let capture_format = config.format;
+            // Force a specific format for capture to ensure compatibility
+            let capture_format = wgpu::TextureFormat::Bgra8Unorm;
             
             println!("Creating capture texture with format: {:?}, size: {}x{}", capture_format, config.width, config.height);
+            println!("Surface format: {:?}", config.format);
             
             let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Capture Texture"),
@@ -145,15 +147,23 @@ impl DualRenderer {
                 mapped_at_creation: false,
             });
             
-            (Some(texture), Some(view), Some(buffer), padded_bytes_per_row)
+            // Create a separate pipeline for the capture format if needed
+            let capture_pipeline = if capture_format != config.format {
+                Some(Self::create_render_pipeline(gpu, &shader, &bind_group_layout, capture_format))
+            } else {
+                None
+            };
+            
+            (Some(texture), Some(view), Some(buffer), padded_bytes_per_row, capture_pipeline)
         } else {
-            (None, None, None, 0)
+            (None, None, None, 0, None)
         };
         
         Ok(Self {
             surface,
             config,
             render_pipeline,
+            capture_pipeline,
             oracle_line_buffer,
             oracle_color_buffer,
             oracle_bind_group,
@@ -246,11 +256,11 @@ impl DualRenderer {
         
         // If capturing, render to capture texture first
         if let Some(capture_view) = &self.capture_view {
-            self.encode_dual_render_pass(&mut encoder, capture_view);
+            self.encode_dual_render_pass(&mut encoder, capture_view, true);
         }
         
         // Always render to surface for visual feedback
-        self.encode_dual_render_pass(&mut encoder, &surface_view);
+        self.encode_dual_render_pass(&mut encoder, &surface_view, false);
         
         let submission_index = gpu.queue.submit(Some(encoder.finish()));
         
@@ -430,6 +440,7 @@ impl DualRenderer {
             .unwrap_or(surface_caps.formats[0]);
         
         let size = window_manager.inner_size();
+        println!("Creating surface config with size: {}x{}", size.width, size.height);
         
         Ok(wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -590,6 +601,7 @@ impl DualRenderer {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
+        is_capture: bool,
     ) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Dual Render Pass"),
@@ -606,7 +618,13 @@ impl DualRenderer {
             occlusion_query_set: None,
         });
         
-        render_pass.set_pipeline(&self.render_pipeline);
+        // Use capture pipeline if rendering to capture texture and it exists
+        let pipeline = if is_capture && self.capture_pipeline.is_some() {
+            self.capture_pipeline.as_ref().unwrap()
+        } else {
+            &self.render_pipeline
+        };
+        render_pass.set_pipeline(pipeline);
         
         // Debug output
         static mut RENDER_COUNT: u32 = 0;
@@ -623,6 +641,12 @@ impl DualRenderer {
             render_pass.set_bind_group(0, &self.oracle_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.oracle_line_buffer.slice(..));
             render_pass.draw(0..self.oracle_vertex_count, 0..1);
+            
+            unsafe {
+                if RENDER_COUNT < 2 {
+                    println!("Drawing oracle scene with {} vertices", self.oracle_vertex_count);
+                }
+            }
         }
         
         // Draw GPU scene (red/opaque)
@@ -630,6 +654,12 @@ impl DualRenderer {
             render_pass.set_bind_group(0, &self.gpu_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.gpu_line_buffer.slice(..));
             render_pass.draw(0..self.gpu_vertex_count, 0..1);
+            
+            unsafe {
+                if RENDER_COUNT < 2 {
+                    println!("Drawing GPU scene with {} vertices", self.gpu_vertex_count);
+                }
+            }
         }
         
     }

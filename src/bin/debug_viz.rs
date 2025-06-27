@@ -137,10 +137,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // For recording, set window size before creating renderer
     if recording {
+        println!("Initial window size: {:?}", window_manager.window().inner_size());
         // Set window to 800x600 for consistent video size
         let _ = window_manager.window().request_inner_size(winit::dpi::LogicalSize::new(800, 600));
         // Give the window system time to process the resize
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(200));
+        println!("Window size after resize: {:?}", window_manager.window().inner_size());
     }
     
     let gpu_context = pollster::block_on(GpuContext::new())?;
