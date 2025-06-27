@@ -11,7 +11,7 @@ pub struct WireframeGeometry;
 
 // Debug mode to render triangles instead of lines
 const DEBUG_TRIANGLES: bool = true;
-const DEBUG_FULLSCREEN: bool = true; // Render a full-screen triangle to test
+const DEBUG_FULLSCREEN: bool = false; // Render actual bodies as triangles
 
 impl WireframeGeometry {
     pub fn generate_vertices_from_bodies(bodies: &[Body]) -> Vec<f32> {
@@ -43,11 +43,11 @@ impl WireframeGeometry {
                     }
                 }
                 
-                // Big red triangle at origin
+                // Big colorful triangle at origin
                 vertices.extend_from_slice(&[
-                    -5.0, 0.0, 0.0, 1.0, 0.0, 0.0,  // Left vertex (red)
-                    5.0, 0.0, 0.0, 1.0, 0.0, 0.0,   // Right vertex (red)
-                    0.0, 10.0, 0.0, 1.0, 0.0, 0.0,  // Top vertex (red)
+                    -10.0, -5.0, 0.0, 1.0, 0.0, 0.0,  // Left vertex (red)
+                    10.0, -5.0, 0.0, 0.0, 1.0, 0.0,   // Right vertex (green)
+                    0.0, 15.0, 0.0, 0.0, 0.0, 1.0,    // Top vertex (blue)
                 ]);
             }
             

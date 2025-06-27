@@ -120,8 +120,8 @@ impl DualRenderer {
             let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
             let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
             
-            // Force a specific format for capture to ensure compatibility
-            let capture_format = wgpu::TextureFormat::Bgra8Unorm;
+            // Use the same format as the surface for capture
+            let capture_format = config.format;
             
             println!("Creating capture texture with format: {:?}, size: {}x{}", capture_format, config.width, config.height);
             println!("Surface format: {:?}", config.format);
@@ -246,13 +246,16 @@ impl DualRenderer {
             label: Some("Dual Render Encoder"),
         });
         
-        // If capturing, render to capture texture first
+        // During capture, we need to render to both capture texture and surface
         if let Some(capture_view) = &self.capture_view {
+            // First render to capture texture
             self.encode_dual_render_pass(&mut encoder, capture_view, true);
+            // Then render to surface for visual feedback
+            self.encode_dual_render_pass(&mut encoder, &surface_view, false);
+        } else {
+            // Normal rendering to surface only
+            self.encode_dual_render_pass(&mut encoder, &surface_view, false);
         }
-        
-        // Always render to surface for visual feedback
-        self.encode_dual_render_pass(&mut encoder, &surface_view, false);
         
         let submission_index = gpu.queue.submit(Some(encoder.finish()));
         
@@ -362,16 +365,27 @@ impl DualRenderer {
                 println!("Capture debug - expected clear color BGRA: [77, 51, 26, 255]");
                 println!("Capture debug - frame data size: {} bytes", frame_data.len());
                 println!("Capture debug - expected size: {} bytes", self.config.width * self.config.height * 4);
-                println!("Capture debug - capture texture format: {:?}", self.config.format);
                 
-                // Check a few more pixels
-                if frame_data.len() >= 16 {
-                    println!("Capture debug - first 4 pixels BGRA:");
-                    for i in 0..4 {
-                        let offset = i * 4;
-                        println!("  Pixel {}: [{}, {}, {}, {}]", i, 
-                            frame_data[offset], frame_data[offset+1], 
-                            frame_data[offset+2], frame_data[offset+3]);
+                // Check center pixels for geometry
+                let center_x = self.config.width / 2;
+                let center_y = self.config.height / 2;
+                let center_offset = ((center_y * self.config.width + center_x) * 4) as usize;
+                if frame_data.len() > center_offset + 4 {
+                    println!("Capture debug - center pixel BGRA: [{}, {}, {}, {}]",
+                        frame_data[center_offset], frame_data[center_offset+1],
+                        frame_data[center_offset+2], frame_data[center_offset+3]);
+                }
+                
+                // Sample a few pixels across the image
+                println!("Capture debug - pixel samples:");
+                for y in (0..self.config.height).step_by(100) {
+                    for x in (0..self.config.width).step_by(200) {
+                        let offset = ((y * self.config.width + x) * 4) as usize;
+                        if offset + 4 <= frame_data.len() {
+                            println!("  Pixel ({}, {}): [{}, {}, {}, {}]", x, y,
+                                frame_data[offset], frame_data[offset+1],
+                                frame_data[offset+2], frame_data[offset+3]);
+                        }
                     }
                 }
             }
@@ -517,17 +531,10 @@ impl DualRenderer {
     }
     
     fn create_dual_shader(device: &wgpu::Device) -> wgpu::ShaderModule {
-        // Use test shader for debugging
-        let use_test_shader = true;
-        let shader_source = if use_test_shader {
-            include_str!("../shaders/dual_debug_test.wgsl")
-        } else {
-            include_str!("../shaders/dual_debug.wgsl")
-        };
-        
+        // Use normal shader
         device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Dual Renderer Shader"),
-            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/dual_debug.wgsl").into()),
         })
     }
     
