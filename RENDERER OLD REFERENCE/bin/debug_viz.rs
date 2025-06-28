@@ -1,21 +1,19 @@
 use clap::Parser;
-use physics_renderer::{
+use physics_core::{
     body::Body,
     gpu::GpuContext,
-    loader::TrajectoryLoader,
-    video::save_frames_as_video,
-    Renderer,
+    viz::{WindowManager, DualRenderer},
 };
-use std::{path::PathBuf, time::{Instant, Duration}, sync::{Arc, Mutex}};
+use std::{path::PathBuf, time::{Instant, Duration}, process::Command, sync::{Arc, Mutex}};
 use winit::{
     dpi::PhysicalPosition,
     event::{ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
 };
+use image::{ImageBuffer, Rgba};
 
 #[derive(Parser, Debug)]
-#[command(name = "physics_renderer")]
+#[command(name = "debug_viz")]
 #[command(about = "Visual debugger for comparing CPU and GPU physics simulations")]
 struct Args {
     /// Path to the oracle (CPU) state file
@@ -39,6 +37,71 @@ struct Args {
     fps: u32,
 }
 
+
+
+fn load_body_trace_from_npy(
+    path: &PathBuf,
+) -> Result<Vec<Vec<Body>>, Box<dyn std::error::Error>> {
+    use npyz::NpyFile;
+    use std::io::Read;
+    
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    let npy = NpyFile::new(&buffer[..])?;
+    
+    let shape = npy.shape();
+    if shape.len() != 2 {
+        return Err(format!("Expected a 2D array (frames, data), but got shape: {:?}", shape).into());
+    }
+    
+    let num_frames = shape[0] as usize;
+    let data_per_frame = shape[1] as usize;
+    let floats_per_body = 18;
+    if data_per_frame % floats_per_body != 0 {
+        return Err(format!("Frame data size ({}) is not divisible by floats per body ({})", data_per_frame, floats_per_body).into());
+    }
+    let num_bodies = data_per_frame / floats_per_body;
+    
+    let data: Vec<f32> = npy.into_vec()?;
+    
+    let mut frames = Vec::with_capacity(num_frames);
+    for frame_idx in 0..num_frames {
+        let mut bodies = Vec::with_capacity(num_bodies);
+        for body_idx in 0..num_bodies {
+            let frame_offset = frame_idx * data_per_frame;
+            let body_offset = body_idx * floats_per_body;
+            let offset = frame_offset + body_offset;
+            
+            let position = [data[offset], data[offset + 1], data[offset + 2], 0.0];
+            let velocity = [data[offset + 3], data[offset + 4], data[offset + 5], 0.0];
+            let orientation = [
+                data[offset + 6],
+                data[offset + 7],
+                data[offset + 8],
+                data[offset + 9],
+            ];
+            let angular_vel = [data[offset + 10], data[offset + 11], data[offset + 12], 0.0];
+            let mass = data[offset + 13];
+            let shape_type = data[offset + 14] as u32;
+            let shape_params = [data[offset + 15], data[offset + 16], data[offset + 17], 0.0];
+            
+            bodies.push(Body {
+                position,
+                velocity,
+                orientation,
+                angular_vel,
+                mass_data: [mass, if mass > 0.0 { 1.0 / mass } else { 0.0 }, 0.0, 0.0],
+                shape_data: [shape_type, 0, 0, 0],
+                shape_params,
+            });
+        }
+        frames.push(bodies);
+    }
+    
+    Ok(frames)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let args = Args::parse();
@@ -48,36 +111,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     if let Some(path) = args.oracle {
         println!("👁️  Loading oracle trace from: {}", path.display());
-        let run = TrajectoryLoader::load_trajectory(&path)?;
-        let metadata = TrajectoryLoader::get_metadata(&run);
-        println!("   Loaded {} frames with {} bodies each", metadata.num_frames, metadata.num_bodies);
-        
-        // Convert run to Vec<Vec<Body>>
-        let mut frames = Vec::new();
-        for frame_idx in 0..metadata.num_frames {
-            frames.push(TrajectoryLoader::get_bodies_at_frame(&run, frame_idx)?);
-        }
-        oracle_trace = Some(frames);
+        let trace = load_body_trace_from_npy(&path)?;
+        println!("   Loaded {} frames with {} bodies each", trace.len(), trace.get(0).map_or(0, |f| f.len()));
+        oracle_trace = Some(trace);
     }
-    
     if let Some(path) = args.gpu {
         println!("👁️  Loading GPU trace from: {}", path.display());
-        let run = TrajectoryLoader::load_trajectory(&path)?;
-        let metadata = TrajectoryLoader::get_metadata(&run);
-        println!("   Loaded {} frames with {} bodies each", metadata.num_frames, metadata.num_bodies);
-        
-        // Convert run to Vec<Vec<Body>>
-        let mut frames = Vec::new();
-        for frame_idx in 0..metadata.num_frames {
-            frames.push(TrajectoryLoader::get_bodies_at_frame(&run, frame_idx)?);
-        }
-        gpu_trace = Some(frames);
+        let trace = load_body_trace_from_npy(&path)?;
+        println!("   Loaded {} frames with {} bodies each", trace.len(), trace.get(0).map_or(0, |f| f.len()));
+        gpu_trace = Some(trace);
     }
     
     let num_frames = oracle_trace.as_ref().map_or(0, |t| t.len()).max(gpu_trace.as_ref().map_or(0, |t| t.len()));
     if num_frames == 0 {
         println!("No trace file loaded, nothing to display. Exiting.");
-        println!("Tip: Use --oracle <path_to_trace.npy> or --gpu <path_to_trace.npy>");
+        println!("Tip: Use --oracle <path_to_trace.npy>");
         return Ok(());
     }
     
@@ -85,29 +133,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let recording = args.record.is_some();
     
     let event_loop = EventLoop::new()?;
+    let window_manager = WindowManager::new(&event_loop)?;
     
-    // Create window
-    let window = WindowBuilder::new()
-        .with_title("Physics Renderer")
-        .with_inner_size(winit::dpi::PhysicalSize::new(800, 600))
-        .build(&event_loop)?;
-    
-    // For recording, ensure consistent window size
+    // For recording, set window size before creating renderer
     if recording {
-        println!("Initial window size: {:?}", window.inner_size());
-        let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(800, 600));
-        std::thread::sleep(Duration::from_millis(500));
+        println!("Initial window size: {:?}", window_manager.window().inner_size());
+        // Set window to 800x600 for consistent video size
+        let _ = window_manager.window().request_inner_size(winit::dpi::PhysicalSize::new(800, 600));
+        // Give the window system time to process the resize
+        std::thread::sleep(Duration::from_millis(500)); // More time for resize
         
-        let current_size = window.inner_size();
+        // Force a resize if needed
+        let current_size = window_manager.window().inner_size();
         println!("Window size after resize request: {:?}", current_size);
         
+        // If the window didn't resize properly, we still need to continue
         if current_size.width != 800 || current_size.height != 600 {
             println!("Warning: Window resize to 800x600 failed, using {}x{}", current_size.width, current_size.height);
         }
     }
     
     let gpu_context = pollster::block_on(GpuContext::new())?;
-    let mut renderer = pollster::block_on(Renderer::new(&window, &gpu_context, recording))?;
+    let mut renderer = pollster::block_on(DualRenderer::new_with_capture(&window_manager, &gpu_context, recording))?;
     
     let output_path = args.record.clone();
     
@@ -156,6 +203,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
                                         if current_count % 30 == 0 {
                                             println!("Captured frame {} of {}", current_count + 1, max_frames);
+                                            // Debug: print first few bytes to see if it's all grey
+                                            if current_count == 0 {
+                                                println!("First 16 bytes: {:?}", &frame_data[..16.min(frame_data.len())]);
+                                            }
                                         }
                                         captured_frames_clone.lock().unwrap().push(frame_data);
                                     }
@@ -166,7 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     
                     last_update = Instant::now();
-                    window.request_redraw();
+                    window_manager.window().request_redraw();
                 }
             }
             Event::WindowEvent { event, .. } => match event {
@@ -217,7 +268,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         match renderer.render(&gpu_context) {
                             Ok(_) => {}
                             Err(wgpu::SurfaceError::Lost) => {
-                                renderer.resize(&gpu_context, window.inner_size())
+                                renderer.resize(&gpu_context, window_manager.inner_size())
                             }
                             Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
                             Err(e) => eprintln!("Render error: {:?}", e),
@@ -241,3 +292,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn save_frames_as_video(
+    frames: &[Vec<u8>],
+    output_path: PathBuf,
+    fps: u32,
+    width: u32,
+    height: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Saving {} frames to video...", frames.len());
+    
+    // Create temp directory
+    let temp_dir = std::env::temp_dir().join(format!("physics_recording_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir)?;
+    
+    // Save frames as PNG files
+    for (i, frame_data) in frames.iter().enumerate() {
+        let filename = temp_dir.join(format!("frame_{:04}.png", i));
+        
+        // Convert BGRA to RGBA
+        let mut rgba_data = vec![0u8; (width * height * 4) as usize];
+        for j in 0..((width * height) as usize) {
+            rgba_data[j * 4] = frame_data[j * 4 + 2];     // R
+            rgba_data[j * 4 + 1] = frame_data[j * 4 + 1]; // G
+            rgba_data[j * 4 + 2] = frame_data[j * 4];     // B
+            rgba_data[j * 4 + 3] = frame_data[j * 4 + 3]; // A
+        }
+        
+        let img = ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(width, height, rgba_data)
+            .ok_or("Failed to create image buffer")?;
+        img.save(&filename)?;
+    }
+    
+    // Run ffmpeg to create video
+    let status = Command::new("ffmpeg")
+        .args(&[
+            "-y", // Overwrite output
+            "-r", &fps.to_string(),
+            "-i", &temp_dir.join("frame_%04d.png").to_string_lossy(),
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "28",
+            "-pix_fmt", "yuv420p",
+            "-vf", "scale=800:600", // Ensure output size
+            &output_path.to_string_lossy(),
+        ])
+        .status()?;
+    
+    if !status.success() {
+        return Err("FFmpeg encoding failed".into());
+    }
+    
+    // Clean up
+    std::fs::remove_dir_all(&temp_dir)?;
+    println!("Video saved to: {}", output_path.display());
+    
+    Ok(())
+}
