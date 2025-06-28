@@ -78,13 +78,16 @@ fn map_scene(p: vec3<f32>) -> f32 {
         
         // Calculate SDF based on shape type
         if (shape_type == 0u) { // Sphere
+            // Sphere is rotation-invariant, so we can use world space directly
             dist = sdSphere(p, pos, body.shape_params.x);
         } else if (shape_type == 2u) { // Box
             let half_extents = body.shape_params.xyz;
+            // Box SDF is calculated in local space
             dist = sdBox(local_p, vec3<f32>(0.0), half_extents);
         } else if (shape_type == 3u) { // Capsule
             let half_height = body.shape_params.x;
             let radius = body.shape_params.y;
+            // Capsule SDF is calculated in local space
             dist = sdCapsule(local_p, vec3<f32>(0.0), half_height, radius);
         }
         
@@ -110,20 +113,23 @@ fn calculate_normal(p: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    // Convert fragment coordinates to NDC
-    let resolution = vec2<f32>(800.0, 600.0); // TODO: Pass as uniform
+    // Convert fragment coordinates to UV coordinates
+    let resolution = vec2<f32>(800.0, 600.0);
     let uv = (frag_coord.xy - 0.5 * resolution) / resolution.y;
     
-    // Get inverse view-projection matrix
-    let inv_view_proj = transpose(view_projection.matrix);
+    // Hardcoded camera for headless mode
+    let cam_pos = vec3<f32>(10.0, 10.0, 10.0);
+    let cam_target = vec3<f32>(0.0, 0.0, 0.0);
     
-    // Create ray in world space
-    let ray_ndc = vec4<f32>(uv.x * 2.0, -uv.y * 2.0, -1.0, 1.0);
-    let ray_world = inv_view_proj * ray_ndc;
-    let ray_dir = normalize(ray_world.xyz);
+    // Calculate camera basis vectors
+    let forward = normalize(cam_target - cam_pos);
+    let world_up = vec3<f32>(0.0, 1.0, 0.0);
+    let right = normalize(cross(world_up, forward));
+    let up = normalize(cross(forward, right));
     
-    // Camera position (extract from inverse view-projection)
-    let cam_pos = (inv_view_proj * vec4<f32>(0.0, 0.0, 0.0, 1.0)).xyz;
+    // Generate ray
+    let ray_origin = cam_pos;
+    let ray_dir = normalize(forward + uv.x * right + uv.y * up);
     
     // Raymarch
     var t = 0.1;
@@ -131,7 +137,7 @@ fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     var hit_pos = vec3<f32>(0.0);
     
     for (var i = 0; i < 64; i = i + 1) {
-        let p = cam_pos + ray_dir * t;
+        let p = ray_origin + ray_dir * t;
         let d = map_scene(p);
         
         if (d < 0.001) {
