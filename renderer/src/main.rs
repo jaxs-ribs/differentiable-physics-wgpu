@@ -38,7 +38,7 @@ use winit::{
 
 #[derive(Parser, Debug)]
 #[command(name = "physics_renderer")]
-#[command(about = "Visual debugger for comparing CPU and GPU physics simulations")]
+#[command(about = "SDF raymarching renderer for physics simulations")]
 struct Args {
     /// Path to the oracle (CPU) state file
     #[arg(long)]
@@ -59,12 +59,70 @@ struct Args {
     /// Frames per second for recording (default: 30)
     #[arg(long, default_value = "30")]
     fps: u32,
+    
+    /// Save a single frame to the specified file path (headless mode)
+    #[arg(long)]
+    save_frame: Option<PathBuf>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let args = Args::parse();
     
+    // Check if we're in headless mode
+    if let Some(output_path) = args.save_frame {
+        // Headless rendering path
+        println!("Running in headless mode, saving frame to: {}", output_path.display());
+        
+        // Initialize GPU without window
+        let gpu_context = pollster::block_on(GpuContext::new())?;
+        let mut renderer = pollster::block_on(Renderer::new(None, &gpu_context, true))?;
+        
+        // Create a hardcoded test scene
+        let test_bodies = vec![
+            Body::new_sphere([0.0, 0.0, 0.0], 1.0, 1.0),         // Sphere at origin
+            Body::new_box([3.0, 0.0, 0.0], [1.0, 1.0, 1.0], 1.0), // Box to the right
+            Body::new_capsule([-3.0, 0.0, 0.0], 1.0, 0.5, 1.0),  // Capsule to the left
+        ];
+        
+        // Update renderer with test bodies
+        renderer.update(&gpu_context, &test_bodies);
+        
+        // Render to texture
+        renderer.render_to_texture(&gpu_context);
+        
+        // Capture frame
+        if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
+            // Convert BGRA to RGBA
+            let width = 800;
+            let height = 600;
+            let mut rgba_data = vec![0u8; frame_data.len()];
+            for i in 0..(width * height) as usize {
+                rgba_data[i * 4] = frame_data[i * 4 + 2];     // R
+                rgba_data[i * 4 + 1] = frame_data[i * 4 + 1]; // G
+                rgba_data[i * 4 + 2] = frame_data[i * 4];     // B
+                rgba_data[i * 4 + 3] = frame_data[i * 4 + 3]; // A
+            }
+            
+            // Save as PNG
+            image::save_buffer(
+                &output_path,
+                &rgba_data,
+                width,
+                height,
+                image::ColorType::Rgba8,
+            )?;
+            
+            println!("✅ SDF frame saved to {}", output_path.display());
+        } else {
+            eprintln!("Failed to capture frame");
+            return Err("Frame capture failed".into());
+        }
+        
+        return Ok(());
+    }
+    
+    // Normal windowed mode path
     let mut oracle_trace: Option<Vec<Vec<Body>>> = None;
     let mut gpu_trace: Option<Vec<Vec<Body>>> = None;
     
@@ -98,9 +156,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let num_frames = oracle_trace.as_ref().map_or(0, |t| t.len()).max(gpu_trace.as_ref().map_or(0, |t| t.len()));
     if num_frames == 0 {
-        println!("No trace file loaded, nothing to display. Exiting.");
-        println!("Tip: Use --oracle <path_to_trace.npy> or --gpu <path_to_trace.npy>");
-        return Ok(());
+        println!("No trace file loaded, using test scene.");
+        // Create a simple test scene
+        let test_scene = vec![vec![
+            Body::new_sphere([0.0, 0.0, 0.0], 1.0, 1.0),
+            Body::new_box([3.0, 0.0, 0.0], [1.0, 1.0, 1.0], 1.0),
+            Body::new_capsule([-3.0, 0.0, 0.0], 1.0, 0.5, 1.0),
+        ]];
+        oracle_trace = Some(test_scene);
     }
     
     // Setup video recording if requested
@@ -110,7 +173,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Create window
     let window = WindowBuilder::new()
-        .with_title("Physics Renderer")
+        .with_title("SDF Physics Renderer")
         .with_inner_size(winit::dpi::PhysicalSize::new(800, 600))
         .build(&event_loop)?;
     
@@ -129,7 +192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     let gpu_context = pollster::block_on(GpuContext::new())?;
-    let mut renderer = pollster::block_on(Renderer::new(&window, &gpu_context, recording))?;
+    let mut renderer = pollster::block_on(Renderer::new(Some(&window), &gpu_context, recording))?;
     
     let output_path = args.record.clone();
     
@@ -162,12 +225,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 
                 if last_update.elapsed() >= frame_duration {
-                    current_frame = (current_frame + 1) % num_frames;
+                    let num_frames = oracle_trace.as_ref().map_or(0, |t| t.len()).max(gpu_trace.as_ref().map_or(0, |t| t.len()));
+                    if num_frames > 0 {
+                        current_frame = (current_frame + 1) % num_frames;
+                    }
                     
-                    let oracle_bodies = oracle_trace.as_ref().and_then(|t| t.get(current_frame)).map(|v| v.as_slice());
-                    let gpu_bodies = gpu_trace.as_ref().and_then(|t| t.get(current_frame)).map(|v| v.as_slice());
+                    // Get bodies from current frame
+                    let bodies = oracle_trace.as_ref()
+                        .and_then(|t| t.get(current_frame))
+                        .or_else(|| gpu_trace.as_ref().and_then(|t| t.get(current_frame)))
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
                     
-                    renderer.update_scenes(&gpu_context, oracle_bodies, gpu_bodies);
+                    renderer.update(&gpu_context, bodies);
                     
                     // During recording, we need to render and capture immediately
                     if recording {
@@ -262,4 +332,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

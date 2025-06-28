@@ -1,15 +1,16 @@
-# Physics Renderer
+# SDF Physics Renderer
 
-A high-performance 3D visualization tool for physics simulations, built with Rust and WebGPU. This renderer provides real-time visualization of physics simulation data with support for comparative analysis and video recording.
+A minimal SDF (Signed Distance Field) raymarching renderer for physics simulations, built with Rust and WebGPU. This renderer uses brute-force raymarching to precisely visualize spheres, boxes, and capsules with support for headless rendering and video recording.
 
 ## Features
 
-- **Real-time 3D Visualization**: Interactive camera controls for exploring physics simulations
-- **Dual-Scene Rendering**: Compare CPU (oracle) and GPU simulation results side-by-side
+- **SDF Raymarching**: Precise visualization using signed distance fields
+- **Shape Support**: Spheres, boxes, and capsules with proper rotations
+- **Headless Mode**: Render to PNG without a window for verification
+- **Real-time 3D Visualization**: Interactive camera controls
 - **Video Recording**: Export simulation playback as MP4 videos
-- **High Performance**: GPU-accelerated rendering using WebGPU
-- **Flexible Data Loading**: Support for NPY format trajectory files
-- **Interactive Controls**: Mouse-based camera manipulation
+- **GPU-accelerated**: Brute-force raymarching on the GPU via WebGPU
+- **NPY Data Loading**: Support for physics simulation trajectory files
 
 ## Installation
 
@@ -34,8 +35,15 @@ cargo build --release
 # Visualize a single simulation
 cargo run -- --oracle path/to/simulation.npy
 
-# Compare two simulations side-by-side
-cargo run -- --oracle path/to/cpu_sim.npy --gpu path/to/gpu_sim.npy
+# Run without data (shows test scene with sphere, box, capsule)
+cargo run
+```
+
+### Headless Rendering
+
+```bash
+# Render a single frame to PNG without opening a window
+cargo run -- --save-frame output.png
 ```
 
 ### Video Recording
@@ -55,6 +63,7 @@ cargo run -- --oracle cpu.npy --gpu gpu.npy --record comparison.mp4 --duration 5
 - `--record <FILE>`: Output video file path (enables recording mode)
 - `--duration <SECONDS>`: Recording duration in seconds (default: 5)
 - `--fps <NUMBER>`: Frames per second for recording (default: 30)
+- `--save-frame <FILE>`: Render a single frame to PNG in headless mode
 
 ### Interactive Controls
 

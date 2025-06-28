@@ -84,6 +84,30 @@ impl Body {
             shape_params: [half_extents[0], half_extents[1], half_extents[2], 0.0],
         }
     }
+    
+    pub fn new_capsule(position: [f32; 3], half_height: f32, radius: f32, mass: f32) -> Self {
+        Self {
+            position: [position[0], position[1], position[2], 0.0],
+            velocity: [0.0; 4],
+            orientation: [1.0, 0.0, 0.0, 0.0],
+            angular_vel: [0.0; 4],
+            mass_data: [mass, if mass > 0.0 { 1.0 / mass } else { 0.0 }, 0.0, 0.0],
+            shape_data: [3, 0, 0, 0], // shape_type=3 (capsule), flags=0 (dynamic)
+            shape_params: [half_height, radius, 0.0, 0.0],
+        }
+    }
+    
+    pub fn new_static_capsule(position: [f32; 3], half_height: f32, radius: f32) -> Self {
+        Self {
+            position: [position[0], position[1], position[2], 0.0],
+            velocity: [0.0; 4],
+            orientation: [1.0, 0.0, 0.0, 0.0],
+            angular_vel: [0.0; 4],
+            mass_data: [0.0, 0.0, 0.0, 0.0],
+            shape_data: [3, 1, 0, 0], // shape_type=3 (capsule), flags=1 (static)
+            shape_params: [half_height, radius, 0.0, 0.0],
+        }
+    }
 }
 
 // Size check is done at runtime for now

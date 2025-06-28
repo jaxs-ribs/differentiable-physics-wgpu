@@ -30,8 +30,8 @@ class BodySchema:
 class ShapeType(IntEnum):
   """Supported collision shapes."""
   SPHERE = 0   # param_1: radius
-  CAPSULE = 1  # param_1: radius, param_2: height
   BOX = 2      # param_1,2,3: half_extents x,y,z
+  CAPSULE = 3  # param_1: half-height, param_2: radius
 
 class Contact(NamedTuple):
   """Contact point information from narrowphase collision detection."""

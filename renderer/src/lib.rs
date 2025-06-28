@@ -1,47 +1,28 @@
-//! Physics simulation renderer with dual-scene visualization support.
+//! Minimal SDF raymarching renderer for physics simulation.
 //!
-//! This is the main renderer module that orchestrates all rendering operations.
-//! It supports simultaneous visualization of two physics simulations (e.g., CPU
-//! oracle vs GPU implementation) for comparison and debugging purposes.
+//! This renderer uses brute-force SDF raymarching to precisely visualize
+//! spheres, boxes, and capsules. It's designed for verifiability with a
+//! headless render-to-file mode.
 //!
 //! # Architecture
-//! The renderer follows a modular design with clear separation of concerns:
 //! - `body`: Physics body data structures
-//! - `camera`: 3D camera controls and transformations
-//! - `gpu`: GPU context and device management
-//! - `mesh`: Wireframe geometry generation
+//! - `camera`: 3D camera controls
+//! - `gpu`: GPU context management
 //! - `video`: Video recording functionality
-//! - `loader`: NPY file loading for trajectory data
-//!
-//! # Features
-//! - Dual-scene rendering for side-by-side comparison
-//! - Real-time camera controls (orbit, zoom)
-//! - Video capture to MP4
-//! - Efficient GPU-based rendering with WebGPU
-//! - Support for large simulations (1000+ bodies)
-//!
-//! # Design Philosophy
-//! Following Uncle Bob's Clean Architecture principles:
-//! - Single Responsibility: Each module has one clear purpose
-//! - Open/Closed: Extensible for new body types without modifying core
-//! - Dependency Inversion: Core renderer depends on abstractions (traits)
-//! - Interface Segregation: Minimal, focused public APIs
+//! - `loader`: NPY file loading
 
 pub mod body;
 pub mod camera;
 pub mod gpu;
-pub mod mesh;
 pub mod video;
 pub mod loader;
 
 use wgpu::util::DeviceExt;
 use camera::Camera;
 use gpu::GpuContext;
-use mesh::WireframeGeometry;
 use body::Body;
 
-const MAX_AABB_COUNT: usize = 1000;
-const VERTEX_BUFFER_SIZE: u64 = 12 * 2 * 6 * 4 * MAX_AABB_COUNT as u64;
+const MAX_BODIES: usize = 1000;
 const CLEAR_COLOR: wgpu::Color = wgpu::Color {
     r: 0.1,  
     g: 0.2,  
@@ -61,32 +42,17 @@ impl ViewProjectionUniform {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct ColorUniform {
-    color: [f32; 4],
-}
-
 pub struct Renderer {
-    surface: wgpu::Surface<'static>,
+    surface: Option<wgpu::Surface<'static>>,
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
-    capture_pipeline: Option<wgpu::RenderPipeline>,
     
-    // Primary scene buffers (for oracle/primary trace)
-    primary_vertex_buffer: wgpu::Buffer,
-    primary_color_buffer: wgpu::Buffer,
-    primary_bind_group: wgpu::BindGroup,
-    primary_vertex_count: u32,
+    // Body data buffer
+    bodies_buffer: wgpu::Buffer,
     
-    // Secondary scene buffers (for GPU/comparison trace)
-    secondary_vertex_buffer: wgpu::Buffer,
-    secondary_color_buffer: wgpu::Buffer,
-    secondary_bind_group: wgpu::BindGroup,
-    secondary_vertex_count: u32,
-    
-    // Shared resources
+    // Camera resources
     view_projection_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
     camera: Camera,
     
     // Frame capture resources (for video recording)
@@ -98,90 +64,90 @@ pub struct Renderer {
 
 impl Renderer {
     pub async fn new(
-        window: &winit::window::Window,
+        window: Option<&winit::window::Window>,
         gpu: &GpuContext,
         enable_capture: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let surface = unsafe {
-            let surface = gpu.instance.create_surface_unsafe(
-                wgpu::SurfaceTargetUnsafe::from_window(window)?
-            )?;
-            std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(surface)
+        // Create surface if window is provided
+        let surface = if let Some(window) = window {
+            let surface = unsafe {
+                let surface = gpu.instance.create_surface_unsafe(
+                    wgpu::SurfaceTargetUnsafe::from_window(window)?
+                )?;
+                std::mem::transmute::<wgpu::Surface<'_>, wgpu::Surface<'static>>(surface)
+            };
+            Some(surface)
+        } else {
+            None
         };
         
-        let surface_caps = surface.get_capabilities(&gpu.adapter);
-        let surface_format = surface_caps.formats.iter()
-            .find(|f| f.is_srgb())
-            .copied()
-            .unwrap_or(surface_caps.formats[0]);
-        
-        let size = window.inner_size();
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: size.width,
-            height: size.height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
+        // Configure surface or use default config
+        let (config, surface_format) = if let Some(ref surface) = surface {
+            let surface_caps = surface.get_capabilities(&gpu.adapter);
+            let surface_format = surface_caps.formats.iter()
+                .find(|f| f.is_srgb())
+                .copied()
+                .unwrap_or(surface_caps.formats[0]);
+            
+            let size = window.unwrap().inner_size();
+            let config = wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: surface_format,
+                width: size.width,
+                height: size.height,
+                present_mode: wgpu::PresentMode::Fifo,
+                alpha_mode: surface_caps.alpha_modes[0],
+                view_formats: vec![],
+                desired_maximum_frame_latency: 2,
+            };
+            surface.configure(&gpu.device, &config);
+            (config, surface_format)
+        } else {
+            // Headless mode - use default config
+            let config = wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                width: 800,
+                height: 600,
+                present_mode: wgpu::PresentMode::Fifo,
+                alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+                view_formats: vec![],
+                desired_maximum_frame_latency: 2,
+            };
+            (config, wgpu::TextureFormat::Bgra8UnormSrgb)
         };
-        surface.configure(&gpu.device, &config);
         
         let camera = Camera::new(config.width as f32 / config.height as f32);
         let view_projection_buffer = Self::create_uniform_buffer(gpu, &camera);
         
-        // Create vertex buffers for both scenes
-        let primary_vertex_buffer = Self::create_vertex_buffer(gpu, "Primary Vertex Buffer");
-        let secondary_vertex_buffer = Self::create_vertex_buffer(gpu, "Secondary Vertex Buffer");
-        
-        // Create color uniforms
-        let primary_color = ColorUniform { color: [1.0, 1.0, 1.0, 1.0] };
-        let secondary_color = ColorUniform { color: [1.0, 1.0, 1.0, 1.0] };
-        
-        let primary_color_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Primary Color Buffer"),
-            contents: bytemuck::cast_slice(&[primary_color]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        
-        let secondary_color_buffer = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Secondary Color Buffer"),
-            contents: bytemuck::cast_slice(&[secondary_color]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        // Create bodies buffer
+        let bodies_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Bodies Buffer"),
+            size: (std::mem::size_of::<Body>() * MAX_BODIES) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
         
         let bind_group_layout = Self::create_bind_group_layout(gpu);
-        
-        let primary_bind_group = Self::create_bind_group(
+        let bind_group = Self::create_bind_group(
             gpu,
             &bind_group_layout,
             &view_projection_buffer,
-            &primary_color_buffer,
-            "Primary"
-        );
-        let secondary_bind_group = Self::create_bind_group(
-            gpu,
-            &bind_group_layout,
-            &view_projection_buffer,
-            &secondary_color_buffer,
-            "Secondary"
+            &bodies_buffer,
         );
         
         let shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Wireframe Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/wireframe.wgsl").into()),
+            label: Some("SDF Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sdf.wgsl").into()),
         });
         
-        let render_pipeline = Self::create_render_pipeline(gpu, &shader, &bind_group_layout, config.format);
+        let render_pipeline = Self::create_render_pipeline(gpu, &shader, &bind_group_layout, surface_format);
         
         // Create capture resources if requested
-        let (capture_texture, capture_view, staging_buffer, bytes_per_row, capture_pipeline) = if enable_capture {
+        let (capture_texture, capture_view, staging_buffer, bytes_per_row) = if enable_capture || surface.is_none() {
             let unpadded_bytes_per_row = config.width * 4;
             let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
             let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
-            
-            let capture_format = config.format;
             
             let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Capture Texture"),
@@ -193,7 +159,7 @@ impl Renderer {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: capture_format,
+                format: surface_format,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
@@ -208,31 +174,18 @@ impl Renderer {
                 mapped_at_creation: false,
             });
             
-            let capture_pipeline = if capture_format != config.format {
-                Some(Self::create_render_pipeline(gpu, &shader, &bind_group_layout, capture_format))
-            } else {
-                None
-            };
-            
-            (Some(texture), Some(view), Some(buffer), padded_bytes_per_row, capture_pipeline)
+            (Some(texture), Some(view), Some(buffer), padded_bytes_per_row)
         } else {
-            (None, None, None, 0, None)
+            (None, None, None, 0)
         };
         
         Ok(Self {
             surface,
             config,
             render_pipeline,
-            capture_pipeline,
-            primary_vertex_buffer,
-            primary_color_buffer,
-            primary_bind_group,
-            primary_vertex_count: 0,
-            secondary_vertex_buffer,
-            secondary_color_buffer,
-            secondary_bind_group,
-            secondary_vertex_count: 0,
+            bodies_buffer,
             view_projection_buffer,
+            bind_group,
             camera,
             capture_texture,
             capture_view,
@@ -241,33 +194,24 @@ impl Renderer {
         })
     }
     
-    pub fn update_scenes(&mut self, gpu: &GpuContext, primary_bodies: Option<&[Body]>, secondary_bodies: Option<&[Body]>) {
-        // Update primary scene
-        if let Some(bodies) = primary_bodies {
-            let vertices = WireframeGeometry::generate_vertices_from_bodies(bodies);
-            self.primary_vertex_count = vertices.len() as u32 / 6; // 6 floats per vertex
-            if !vertices.is_empty() {
-                gpu.queue.write_buffer(&self.primary_vertex_buffer, 0, bytemuck::cast_slice(&vertices));
-            }
-        } else {
-            self.primary_vertex_count = 0;
-        }
-        
-        // Update secondary scene
-        if let Some(bodies) = secondary_bodies {
-            let vertices = WireframeGeometry::generate_vertices_from_bodies(bodies);
-            self.secondary_vertex_count = vertices.len() as u32 / 6;
-            if !vertices.is_empty() {
-                gpu.queue.write_buffer(&self.secondary_vertex_buffer, 0, bytemuck::cast_slice(&vertices));
-            }
-        } else {
-            self.secondary_vertex_count = 0;
+    pub fn update(&mut self, gpu: &GpuContext, bodies: &[Body]) {
+        // Write entire body slice to GPU
+        if !bodies.is_empty() {
+            let bytes = bytemuck::cast_slice(bodies);
+            gpu.queue.write_buffer(&self.bodies_buffer, 0, bytes);
         }
     }
     
     pub fn render(&self, gpu: &GpuContext) -> Result<(), wgpu::SurfaceError> {
-        let output = self.surface.get_current_texture()?;
-        let surface_view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let output = if let Some(ref surface) = self.surface {
+            Some(surface.get_current_texture()?)
+        } else {
+            None
+        };
+        
+        let surface_view = output.as_ref().map(|o| 
+            o.texture.create_view(&wgpu::TextureViewDescriptor::default())
+        );
         
         self.update_uniform_buffer(gpu);
 
@@ -275,12 +219,12 @@ impl Renderer {
             label: Some("Render Encoder"),
         });
         
-        if let Some(capture_view) = &self.capture_view {
-            self.encode_render_pass(&mut encoder, capture_view, true);
-            self.encode_render_pass(&mut encoder, &surface_view, false);
-        } else {
-            self.encode_render_pass(&mut encoder, &surface_view, false);
-        }
+        // Render to capture texture if available, otherwise to surface
+        let render_view = self.capture_view.as_ref()
+            .or(surface_view.as_ref())
+            .expect("No render target available");
+        
+        self.encode_render_pass(&mut encoder, render_view);
         
         let submission_index = gpu.queue.submit(Some(encoder.finish()));
         
@@ -288,9 +232,26 @@ impl Renderer {
             gpu.device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(submission_index));
         }
         
-        output.present();
+        if let Some(output) = output {
+            output.present();
+        }
         
         Ok(())
+    }
+    
+    pub fn render_to_texture(&self, gpu: &GpuContext) {
+        self.update_uniform_buffer(gpu);
+
+        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Render Encoder"),
+        });
+        
+        if let Some(ref capture_view) = self.capture_view {
+            self.encode_render_pass(&mut encoder, capture_view);
+        }
+        
+        let submission_index = gpu.queue.submit(Some(encoder.finish()));
+        gpu.device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(submission_index));
     }
     
     pub fn capture_frame(&self, gpu: &GpuContext) -> Option<Vec<u8>> {
@@ -359,7 +320,9 @@ impl Renderer {
         if new_size.width > 0 && new_size.height > 0 {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
-            self.surface.configure(&gpu.device, &self.config);
+            if let Some(ref surface) = self.surface {
+                surface.configure(&gpu.device, &self.config);
+            }
             
             self.camera.update_aspect_ratio(self.config.width as f32 / self.config.height as f32);
             self.update_uniform_buffer(gpu);
@@ -380,22 +343,13 @@ impl Renderer {
         })
     }
     
-    fn create_vertex_buffer(gpu: &GpuContext, label: &str) -> wgpu::Buffer {
-        gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: VERTEX_BUFFER_SIZE,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        })
-    }
-    
     fn create_bind_group_layout(gpu: &GpuContext) -> wgpu::BindGroupLayout {
         gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Renderer Bind Group Layout"),
+            label: Some("SDF Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -407,7 +361,7 @@ impl Renderer {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -421,11 +375,10 @@ impl Renderer {
         gpu: &GpuContext,
         layout: &wgpu::BindGroupLayout,
         view_projection_buffer: &wgpu::Buffer,
-        color_buffer: &wgpu::Buffer,
-        label: &str,
+        bodies_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("{} Bind Group", label)),
+            label: Some("SDF Bind Group"),
             layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -434,7 +387,7 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: color_buffer.as_entire_binding(),
+                    resource: bodies_buffer.as_entire_binding(),
                 },
             ],
         })
@@ -447,25 +400,25 @@ impl Renderer {
         surface_format: wgpu::TextureFormat,
     ) -> wgpu::RenderPipeline {
         let pipeline_layout = gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Renderer Pipeline Layout"),
+            label: Some("SDF Pipeline Layout"),
             bind_group_layouts: &[bind_group_layout],
             push_constant_ranges: &[],
         });
         
         gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Renderer Pipeline"),
+            label: Some("SDF Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: shader,
                 entry_point: "vs_main",
-                buffers: &[Self::vertex_buffer_layout()],
+                buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -484,33 +437,13 @@ impl Renderer {
         })
     }
     
-    fn vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: 6 * 4, // 3 position + 3 color floats
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: 3 * 4,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-            ],
-        }
-    }
-    
     fn encode_render_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
-        is_capture: bool,
     ) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Wireframe Render Pass"),
+            label: Some("SDF Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 resolve_target: None,
@@ -524,26 +457,9 @@ impl Renderer {
             occlusion_query_set: None,
         });
         
-        let pipeline = if is_capture && self.capture_pipeline.is_some() {
-            self.capture_pipeline.as_ref().unwrap()
-        } else {
-            &self.render_pipeline
-        };
-        render_pass.set_pipeline(pipeline);
-        
-        // Draw primary scene
-        if self.primary_vertex_count > 0 {
-            render_pass.set_bind_group(0, &self.primary_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.primary_vertex_buffer.slice(..));
-            render_pass.draw(0..self.primary_vertex_count * 6, 0..1);
-        }
-        
-        // Draw secondary scene
-        if self.secondary_vertex_count > 0 {
-            render_pass.set_bind_group(0, &self.secondary_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.secondary_vertex_buffer.slice(..));
-            render_pass.draw(0..self.secondary_vertex_count * 6, 0..1);
-        }
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.bind_group, &[]);
+        render_pass.draw(0..3, 0..1); // Single full-screen triangle
     }
     
     fn update_uniform_buffer(&self, gpu: &GpuContext) {
