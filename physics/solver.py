@@ -109,26 +109,38 @@ def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Te
   angular_term_b = (contact_normals * cross_product(ang_delta_b, r_b)).sum(axis=1)
   
   # Calculate impulse magnitudes
-  # Standard impulse formula: j = -(1 + e) * v_rel·n / (denominators)
-  # But we need to be careful about the sign convention
-  numerator = -(1.0 + restitution) * v_rel_normal
+  # Standard impulse formula: j = (1 + e) * |v_rel·n| / (denominators)
+  # We want the magnitude to be positive
+  numerator = (1.0 + restitution) * (-v_rel_normal)  # -v_rel_normal because v_rel_normal < 0 for approaching
   denominator = inv_mass_a + inv_mass_b + angular_term_a + angular_term_b
   denominator = denominator.maximum(1e-6)  # Prevent division by zero
   j_magnitude = numerator / denominator
+  
+  # DEBUG: Print first active contact
+  if False and active_mask.sum() > 0:
+    idx = active_mask.numpy().nonzero()[0][0]
+    print(f"\nDEBUG SOLVER: Contact {idx}")
+    print(f"  v_rel_normal[{idx}] = {v_rel_normal[idx].numpy()}")
+    print(f"  numerator[{idx}] = {numerator[idx].numpy()}")
+    print(f"  denominator[{idx}] = {denominator[idx].numpy()}")
+    print(f"  j_magnitude[{idx}] = {j_magnitude[idx].numpy()}")
   
   # Apply active mask
   j_magnitude = j_magnitude * active_mask.float()
   
   # Calculate impulse vectors
-  impulse_vectors = j_magnitude.unsqueeze(1) * contact_normals  # (M, 3)
+  # The impulse on A is in the direction of the normal (from B to A)
+  # The impulse on B is in the opposite direction
+  impulse_vectors_a = j_magnitude.unsqueeze(1) * contact_normals  # (M, 3)
+  impulse_vectors_b = -impulse_vectors_a  # Equal and opposite
   
   # Calculate velocity changes
-  delta_vel_a = impulse_vectors * inv_mass_a.unsqueeze(1)  # (M, 3)
-  delta_vel_b = -impulse_vectors * inv_mass_b.unsqueeze(1)  # (M, 3)
+  delta_vel_a = impulse_vectors_a * inv_mass_a.unsqueeze(1)  # (M, 3)
+  delta_vel_b = impulse_vectors_b * inv_mass_b.unsqueeze(1)  # (M, 3)
   
   # Calculate angular velocity changes
-  delta_ang_vel_a = (inv_I_world_a @ cross_product(r_a, impulse_vectors).unsqueeze(-1)).squeeze(-1)
-  delta_ang_vel_b = -(inv_I_world_b @ cross_product(r_b, impulse_vectors).unsqueeze(-1)).squeeze(-1)
+  delta_ang_vel_a = (inv_I_world_a @ cross_product(r_a, impulse_vectors_a).unsqueeze(-1)).squeeze(-1)
+  delta_ang_vel_b = (inv_I_world_b @ cross_product(r_b, impulse_vectors_b).unsqueeze(-1)).squeeze(-1)
   
   # Position correction (Baumgarte stabilization)
   correction_percent = 0.2
@@ -185,7 +197,9 @@ def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Te
   
   # Reshape back and apply the accumulated changes
   delta_bodies = delta_flat.reshape(bodies.shape)
-  return bodies + delta_bodies
+  # Create a new tensor to avoid in-place modification issues
+  # This clone() is critical - without it, collision resolution applies twice!
+  return bodies.clone() + delta_bodies
 
 def cross_product(a: Tensor, b: Tensor) -> Tensor:
   """Compute cross product of two 3D vector tensors.
