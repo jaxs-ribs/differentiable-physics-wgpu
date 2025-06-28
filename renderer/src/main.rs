@@ -69,212 +69,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let args = Args::parse();
     
-    // Check if we're in headless mode
     if let Some(output_path) = args.save_frame {
-        // Headless rendering path
-        println!("Running in headless mode, saving frame to: {}", output_path.display());
-        
-        // Initialize GPU without window
-        let gpu_context = pollster::block_on(GpuContext::new())?;
-        let mut renderer = pollster::block_on(Renderer::new(None, &gpu_context, true))?;
-        
-        // Create a hardcoded test scene
-        let test_bodies = vec![
-            Body::new_sphere([0.0, 0.0, 0.0], 1.0, 1.0),         // Sphere at origin
-            Body::new_box([3.0, 0.0, 0.0], [1.0, 1.0, 1.0], 1.0), // Box to the right
-            Body::new_capsule([-3.0, 0.0, 0.0], 1.0, 0.5, 1.0),  // Capsule to the left
-        ];
-        
-        // Update renderer with test bodies
-        renderer.update(&gpu_context, &test_bodies);
-        
-        // Render to texture
-        renderer.render_to_texture(&gpu_context);
-        
-        // Capture frame
-        if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
-            // Convert BGRA to RGBA
-            let width = 800;
-            let height = 600;
-            let mut rgba_data = vec![0u8; frame_data.len()];
-            for i in 0..(width * height) as usize {
-                rgba_data[i * 4] = frame_data[i * 4 + 2];     // R
-                rgba_data[i * 4 + 1] = frame_data[i * 4 + 1]; // G
-                rgba_data[i * 4 + 2] = frame_data[i * 4];     // B
-                rgba_data[i * 4 + 3] = frame_data[i * 4 + 3]; // A
-            }
-            
-            // Save as PNG
-            image::save_buffer(
-                &output_path,
-                &rgba_data,
-                width,
-                height,
-                image::ColorType::Rgba8,
-            )?;
-            
-            println!("✅ SDF frame saved to {}", output_path.display());
-        } else {
-            eprintln!("Failed to capture frame");
-            return Err("Frame capture failed".into());
-        }
-        
-        return Ok(());
+        return run_headless(output_path);
     }
     
-    // Normal windowed mode path
-    let mut oracle_trace: Option<Vec<Vec<Body>>> = None;
-    let mut gpu_trace: Option<Vec<Vec<Body>>> = None;
+    let (oracle_trace, gpu_trace) = load_traces(&args)?;
+    let simulation_frames = get_frame_count(&oracle_trace, &gpu_trace);
     
-    if let Some(path) = args.oracle {
-        println!("👁️  Loading oracle trace from: {}", path.display());
-        let run = TrajectoryLoader::load_trajectory(&path)?;
-        let metadata = TrajectoryLoader::get_metadata(&run);
-        println!("   Loaded {} frames with {} bodies each", metadata.num_frames, metadata.num_bodies);
-        
-        // Convert run to Vec<Vec<Body>>
-        let mut frames = Vec::new();
-        for frame_idx in 0..metadata.num_frames {
-            frames.push(TrajectoryLoader::get_bodies_at_frame(&run, frame_idx)?);
-        }
-        oracle_trace = Some(frames);
-    }
-    
-    if let Some(path) = args.gpu {
-        println!("👁️  Loading GPU trace from: {}", path.display());
-        let run = TrajectoryLoader::load_trajectory(&path)?;
-        let metadata = TrajectoryLoader::get_metadata(&run);
-        println!("   Loaded {} frames with {} bodies each", metadata.num_frames, metadata.num_bodies);
-        
-        // Convert run to Vec<Vec<Body>>
-        let mut frames = Vec::new();
-        for frame_idx in 0..metadata.num_frames {
-            frames.push(TrajectoryLoader::get_bodies_at_frame(&run, frame_idx)?);
-        }
-        gpu_trace = Some(frames);
-    }
-    
-    let num_frames = oracle_trace.as_ref().map_or(0, |t| t.len()).max(gpu_trace.as_ref().map_or(0, |t| t.len()));
-    if num_frames == 0 {
-        println!("No trace file loaded, using test scene.");
-        // Create a simple test scene
-        let test_scene = vec![vec![
-            Body::new_sphere([0.0, 0.0, 0.0], 1.0, 1.0),
-            Body::new_box([3.0, 0.0, 0.0], [1.0, 1.0, 1.0], 1.0),
-            Body::new_capsule([-3.0, 0.0, 0.0], 1.0, 0.5, 1.0),
-        ]];
-        oracle_trace = Some(test_scene);
-    }
-    
-    // Setup video recording if requested
     let recording = args.record.is_some();
-    
     let event_loop = EventLoop::new()?;
-    
-    // Create window
-    let window = WindowBuilder::new()
-        .with_title("SDF Physics Renderer")
-        .with_inner_size(winit::dpi::PhysicalSize::new(800, 600))
-        .build(&event_loop)?;
-    
-    // For recording, ensure consistent window size
-    if recording {
-        println!("Initial window size: {:?}", window.inner_size());
-        let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(800, 600));
-        std::thread::sleep(Duration::from_millis(500));
-        
-        let current_size = window.inner_size();
-        println!("Window size after resize request: {:?}", current_size);
-        
-        if current_size.width != 800 || current_size.height != 600 {
-            println!("Warning: Window resize to 800x600 failed, using {}x{}", current_size.width, current_size.height);
-        }
-    }
+    let window = create_window(&event_loop, recording)?;
     
     let gpu_context = pollster::block_on(GpuContext::new())?;
     let mut renderer = pollster::block_on(Renderer::new(Some(&window), &gpu_context, recording))?;
     
-    let output_path = args.record.clone();
-    
-    let captured_frames = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
-    
-    let mut current_frame = 0;
-    let recording_fps = args.fps;
-    let frame_duration = if recording {
-        Duration::from_millis(1000 / recording_fps as u64)
-    } else {
-        Duration::from_millis(16) // ~60 FPS for interactive mode
+    let mut app_state = ApplicationState {
+        oracle_trace,
+        gpu_trace,
+        current_frame: 0,
+        recording,
+        recording_fps: args.fps,
+        frame_duration: calculate_frame_duration(recording, args.fps),
+        last_update: Instant::now(),
+        max_frames: calculate_max_frames(recording, simulation_frames, args.fps, args.duration),
+        mouse_pressed: false,
+        last_mouse_pos: PhysicalPosition::new(0.0, 0.0),
+        captured_frames: Arc::new(Mutex::new(Vec::<Vec<u8>>::new())),
+        output_path: args.record.clone(),
     };
-    let mut last_update = Instant::now();
-    let simulation_frames = oracle_trace.as_ref().map_or(0, |t| t.len()).max(gpu_trace.as_ref().map_or(0, |t| t.len()));
-    let max_frames = if recording {
-        simulation_frames // For recording, capture all simulation frames
-    } else {
-        (recording_fps as f32 * args.duration) as usize
-    };
-
-    let mut mouse_pressed = false;
-    let mut last_mouse_pos: PhysicalPosition<f64> = PhysicalPosition::new(0.0, 0.0);
-    const MOUSE_SENSITIVITY: f32 = 0.01;
     
-    let captured_frames_clone = captured_frames.clone();
+    let captured_frames_clone = app_state.captured_frames.clone();
+    let captured_frames_final = app_state.captured_frames.clone();
+    let recording = app_state.recording;
+    let output_path = app_state.output_path.clone();
+    let recording_fps = app_state.recording_fps;
     
     event_loop.run(move |event, elwt| {
         elwt.set_control_flow(ControlFlow::Poll);
 
         match event {
             Event::AboutToWait => {
-                // Check if recording should end
-                if recording && captured_frames_clone.lock().unwrap().len() >= max_frames {
-                    elwt.exit();
-                }
-                
-                if last_update.elapsed() >= frame_duration {
-                    let num_frames = oracle_trace.as_ref().map_or(0, |t| t.len()).max(gpu_trace.as_ref().map_or(0, |t| t.len()));
-                    if num_frames > 0 {
-                        if recording {
-                            // For recording, play through frames once
-                            current_frame = current_frame + 1;
-                            if current_frame >= num_frames {
-                                elwt.exit(); // Exit when we've played all frames
-                                return;
-                            }
-                        } else {
-                            // For interactive mode, loop frames
-                            current_frame = (current_frame + 1) % num_frames;
-                        }
-                    }
-                    
-                    // Get bodies from current frame
-                    let bodies = oracle_trace.as_ref()
-                        .and_then(|t| t.get(current_frame))
-                        .or_else(|| gpu_trace.as_ref().and_then(|t| t.get(current_frame)))
-                        .map(|v| v.as_slice())
-                        .unwrap_or(&[]);
-                    
-                    renderer.update(&gpu_context, bodies);
-                    
-                    // During recording, we need to render and capture immediately
-                    if recording {
-                        match renderer.render(&gpu_context) {
-                            Ok(_) => {
-                                let current_count = captured_frames_clone.lock().unwrap().len();
-                                if current_count < max_frames {
-                                    if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
-                                        if current_count % 30 == 0 {
-                                            println!("Captured frame {} of {}", current_count + 1, max_frames);
-                                        }
-                                        captured_frames_clone.lock().unwrap().push(frame_data);
-                                    }
-                                }
-                            }
-                            Err(e) => eprintln!("Render error during recording: {:?}", e),
-                        }
-                    }
-                    
-                    last_update = Instant::now();
-                    window.request_redraw();
-                }
+                handle_frame_update(
+                    &mut app_state,
+                    &mut renderer,
+                    &gpu_context,
+                    &window,
+                    elwt,
+                    &captured_frames_clone,
+                );
             }
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => elwt.exit(),
@@ -282,24 +124,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     renderer.resize(&gpu_context, physical_size);
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
-                    if button == MouseButton::Left {
-                        mouse_pressed = state == ElementState::Pressed;
-                    }
+                    handle_mouse_input(&mut app_state, state, button);
                 }
                 WindowEvent::CursorMoved { position, .. } => {
-                    if mouse_pressed {
-                        let delta_x = (position.x - last_mouse_pos.x) as f32 * MOUSE_SENSITIVITY;
-                        let delta_y = (position.y - last_mouse_pos.y) as f32 * MOUSE_SENSITIVITY;
-                        renderer.camera_mut().rotate(-delta_x, -delta_y);
-                    }
-                    last_mouse_pos = position;
+                    handle_cursor_moved(&mut app_state, &mut renderer, position);
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
-                    let scroll_amount = match delta {
-                        MouseScrollDelta::LineDelta(_, y) => y,
-                        MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-                    };
-                    renderer.camera_mut().zoom(scroll_amount);
+                    handle_mouse_wheel(&mut renderer, delta);
                 }
                 WindowEvent::KeyboardInput {
                     event:
@@ -319,17 +150,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     _ => {}
                 },
                 WindowEvent::RedrawRequested => {
-                    // During recording, rendering is handled in AboutToWait
-                    if !recording {
-                        match renderer.render(&gpu_context) {
-                            Ok(_) => {}
-                            Err(wgpu::SurfaceError::Lost) => {
-                                renderer.resize(&gpu_context, window.inner_size())
-                            }
-                            Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
-                            Err(e) => eprintln!("Render error: {:?}", e),
-                        }
-                    }
+                    handle_redraw(&app_state, &mut renderer, &gpu_context, &window, elwt);
                 }
                 _ => {}
             },
@@ -337,13 +158,327 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     })?;
     
-    // Save video if recording
     if recording {
         if let Some(output_path) = output_path {
-            let frames = captured_frames.lock().unwrap();
-            save_frames_as_video(&*frames, output_path, recording_fps, 800, 600)?;
+            let frames = captured_frames_final.lock().unwrap();
+            save_frames_as_video(
+                &*frames,
+                output_path,
+                recording_fps,
+                DEFAULT_WINDOW_WIDTH,
+                DEFAULT_WINDOW_HEIGHT,
+            )?;
         }
     }
-
     Ok(())
 }
+
+const MOUSE_SENSITIVITY: f32 = 0.01;
+const DEFAULT_WINDOW_WIDTH: u32 = 800;
+const DEFAULT_WINDOW_HEIGHT: u32 = 600;
+
+struct ApplicationState {
+    oracle_trace: Option<Vec<Vec<Body>>>,
+    gpu_trace: Option<Vec<Vec<Body>>>,
+    current_frame: usize,
+    recording: bool,
+    recording_fps: u32,
+    frame_duration: Duration,
+    last_update: Instant,
+    max_frames: usize,
+    mouse_pressed: bool,
+    last_mouse_pos: PhysicalPosition<f64>,
+    captured_frames: Arc<Mutex<Vec<Vec<u8>>>>,
+    output_path: Option<PathBuf>,
+}
+
+fn run_headless(output_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Running in headless mode, saving frame to: {}", output_path.display());
+    
+    let gpu_context = pollster::block_on(GpuContext::new())?;
+    let mut renderer = pollster::block_on(Renderer::new(None, &gpu_context, true))?;
+    
+    let test_bodies = create_test_scene();
+    renderer.update(&gpu_context, &test_bodies);
+    renderer.render_to_texture(&gpu_context);
+    
+    if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
+        let rgba_data = convert_bgra_to_rgba(&frame_data, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+        save_frame_as_png(&output_path, &rgba_data, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)?;
+        println!("✅ SDF frame saved to {}", output_path.display());
+    } else {
+        return Err("Frame capture failed".into());
+    }
+    
+    Ok(())
+}
+
+fn create_test_scene() -> Vec<Body> {
+    vec![
+        Body::new_sphere([0.0, 0.0, 0.0], 1.0, 1.0),
+        Body::new_box([3.0, 0.0, 0.0], [1.0, 1.0, 1.0], 1.0),
+        Body::new_capsule([-3.0, 0.0, 0.0], 1.0, 0.5, 1.0),
+    ]
+}
+
+fn convert_bgra_to_rgba(bgra_data: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let mut rgba_data = vec![0u8; bgra_data.len()];
+    for i in 0..(width * height) as usize {
+        rgba_data[i * 4] = bgra_data[i * 4 + 2];     // R
+        rgba_data[i * 4 + 1] = bgra_data[i * 4 + 1]; // G
+        rgba_data[i * 4 + 2] = bgra_data[i * 4];     // B
+        rgba_data[i * 4 + 3] = bgra_data[i * 4 + 3]; // A
+    }
+    rgba_data
+}
+
+fn save_frame_as_png(
+    path: &PathBuf,
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    image::save_buffer(path, data, width, height, image::ColorType::Rgba8)?;
+    Ok(())
+}
+
+fn load_traces(args: &Args) -> Result<(Option<Vec<Vec<Body>>>, Option<Vec<Vec<Body>>>), Box<dyn std::error::Error>> {
+    let oracle_trace = load_trace_file(&args.oracle, "oracle")?;
+    let gpu_trace = load_trace_file(&args.gpu, "GPU")?;
+    
+    let (oracle_trace, gpu_trace) = ensure_has_frames(oracle_trace, gpu_trace);
+    Ok((oracle_trace, gpu_trace))
+}
+
+fn load_trace_file(
+    path: &Option<PathBuf>,
+    trace_type: &str,
+) -> Result<Option<Vec<Vec<Body>>>, Box<dyn std::error::Error>> {
+    match path {
+        Some(path) => {
+            println!("👁️  Loading {} trace from: {}", trace_type, path.display());
+            let run = TrajectoryLoader::load_trajectory(path)?;
+            let metadata = TrajectoryLoader::get_metadata(&run);
+            println!("   Loaded {} frames with {} bodies each", metadata.num_frames, metadata.num_bodies);
+            
+            let frames = (0..metadata.num_frames)
+                .map(|idx| TrajectoryLoader::get_bodies_at_frame(&run, idx))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Some(frames))
+        }
+        None => Ok(None),
+    }
+}
+
+fn ensure_has_frames(
+    oracle_trace: Option<Vec<Vec<Body>>>,
+    gpu_trace: Option<Vec<Vec<Body>>>,
+) -> (Option<Vec<Vec<Body>>>, Option<Vec<Vec<Body>>>) {
+    let has_frames = oracle_trace.as_ref().map_or(false, |t| !t.is_empty())
+        || gpu_trace.as_ref().map_or(false, |t| !t.is_empty());
+    
+    if !has_frames {
+        println!("No trace file loaded, using test scene.");
+        (Some(vec![create_test_scene()]), gpu_trace)
+    } else {
+        (oracle_trace, gpu_trace)
+    }
+}
+
+fn get_frame_count(
+    oracle_trace: &Option<Vec<Vec<Body>>>,
+    gpu_trace: &Option<Vec<Vec<Body>>>,
+) -> usize {
+    oracle_trace.as_ref().map_or(0, |t| t.len())
+        .max(gpu_trace.as_ref().map_or(0, |t| t.len()))
+}
+
+fn create_window(
+    event_loop: &EventLoop<()>,
+    recording: bool,
+) -> Result<winit::window::Window, Box<dyn std::error::Error>> {
+    let window = WindowBuilder::new()
+        .with_title("SDF Physics Renderer")
+        .with_inner_size(winit::dpi::PhysicalSize::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT))
+        .build(event_loop)?;
+    
+    if recording {
+        ensure_window_size(&window, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+    }
+    
+    Ok(window)
+}
+
+fn ensure_window_size(window: &winit::window::Window, width: u32, height: u32) {
+    println!("Initial window size: {:?}", window.inner_size());
+    let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+    std::thread::sleep(Duration::from_millis(500));
+    
+    let current_size = window.inner_size();
+    println!("Window size after resize request: {:?}", current_size);
+    
+    if current_size.width != width || current_size.height != height {
+        println!("Warning: Window resize to {}x{} failed, using {}x{}",
+                 width, height, current_size.width, current_size.height);
+    }
+}
+
+fn calculate_frame_duration(recording: bool, fps: u32) -> Duration {
+    if recording {
+        Duration::from_millis(1000 / fps as u64)
+    } else {
+        Duration::from_millis(16) // ~60 FPS for interactive mode
+    }
+}
+
+fn calculate_max_frames(
+    recording: bool,
+    simulation_frames: usize,
+    fps: u32,
+    duration: f32,
+) -> usize {
+    if recording {
+        simulation_frames
+    } else {
+        (fps as f32 * duration) as usize
+    }
+}
+
+fn handle_frame_update(
+    state: &mut ApplicationState,
+    renderer: &mut Renderer,
+    gpu_context: &GpuContext,
+    window: &winit::window::Window,
+    elwt: &winit::event_loop::EventLoopWindowTarget<()>,
+    captured_frames: &Arc<Mutex<Vec<Vec<u8>>>>,
+) {
+    if should_exit_recording(state, captured_frames) {
+        elwt.exit();
+        return;
+    }
+    
+    if state.last_update.elapsed() >= state.frame_duration {
+        if let Some(new_frame) = advance_frame(state) {
+            state.current_frame = new_frame;
+        } else {
+            elwt.exit();
+            return;
+        }
+        
+        let bodies = get_current_frame_bodies(state);
+        renderer.update(gpu_context, bodies);
+        
+        if state.recording {
+            capture_frame_for_recording(renderer, gpu_context, captured_frames, state.max_frames);
+        }
+        
+        state.last_update = Instant::now();
+        window.request_redraw();
+    }
+}
+
+fn should_exit_recording(
+    state: &ApplicationState,
+    captured_frames: &Arc<Mutex<Vec<Vec<u8>>>>,
+) -> bool {
+    state.recording && captured_frames.lock().unwrap().len() >= state.max_frames
+}
+
+fn advance_frame(state: &ApplicationState) -> Option<usize> {
+    let num_frames = get_frame_count(&state.oracle_trace, &state.gpu_trace);
+    if num_frames == 0 {
+        return Some(state.current_frame);
+    }
+    
+    if state.recording {
+        let next = state.current_frame + 1;
+        if next >= num_frames {
+            None
+        } else {
+            Some(next)
+        }
+    } else {
+        Some((state.current_frame + 1) % num_frames)
+    }
+}
+
+fn get_current_frame_bodies(state: &ApplicationState) -> &[Body] {
+    state.oracle_trace.as_ref()
+        .and_then(|t| t.get(state.current_frame))
+        .or_else(|| state.gpu_trace.as_ref().and_then(|t| t.get(state.current_frame)))
+        .map(|v| v.as_slice())
+        .unwrap_or(&[])
+}
+
+fn capture_frame_for_recording(
+    renderer: &mut Renderer,
+    gpu_context: &GpuContext,
+    captured_frames: &Arc<Mutex<Vec<Vec<u8>>>>,
+    max_frames: usize,
+) {
+    match renderer.render(gpu_context) {
+        Ok(_) => {
+            let mut frames = captured_frames.lock().unwrap();
+            if frames.len() < max_frames {
+                if let Some(frame_data) = renderer.capture_frame(gpu_context) {
+                    if frames.len() % 30 == 0 {
+                        println!("Captured frame {} of {}", frames.len() + 1, max_frames);
+                    }
+                    frames.push(frame_data);
+                }
+            }
+        }
+        Err(e) => eprintln!("Render error during recording: {:?}", e),
+    }
+}
+
+fn handle_mouse_input(
+    state: &mut ApplicationState,
+    element_state: ElementState,
+    button: MouseButton,
+) {
+    if button == MouseButton::Left {
+        state.mouse_pressed = element_state == ElementState::Pressed;
+    }
+}
+
+fn handle_cursor_moved(
+    state: &mut ApplicationState,
+    renderer: &mut Renderer,
+    position: PhysicalPosition<f64>,
+) {
+    if state.mouse_pressed {
+        let delta_x = (position.x - state.last_mouse_pos.x) as f32 * MOUSE_SENSITIVITY;
+        let delta_y = (position.y - state.last_mouse_pos.y) as f32 * MOUSE_SENSITIVITY;
+        renderer.camera_mut().rotate(-delta_x, -delta_y);
+    }
+    state.last_mouse_pos = position;
+}
+
+fn handle_mouse_wheel(renderer: &mut Renderer, delta: MouseScrollDelta) {
+    let scroll_amount = match delta {
+        MouseScrollDelta::LineDelta(_, y) => y,
+        MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+    };
+    renderer.camera_mut().zoom(scroll_amount);
+}
+
+fn handle_redraw(
+    state: &ApplicationState,
+    renderer: &mut Renderer,
+    gpu_context: &GpuContext,
+    window: &winit::window::Window,
+    elwt: &winit::event_loop::EventLoopWindowTarget<()>,
+) {
+    if !state.recording {
+        match renderer.render(gpu_context) {
+            Ok(_) => {}
+            Err(wgpu::SurfaceError::Lost) => {
+                renderer.resize(gpu_context, window.inner_size())
+            }
+            Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
+            Err(e) => eprintln!("Render error: {:?}", e),
+        }
+    }
+}
+
