@@ -1,3 +1,25 @@
+//! Video recording and export functionality.
+//!
+//! This module provides video recording capabilities for the renderer, allowing
+//! simulation playback to be exported as MP4 files. It handles frame capture,
+//! color space conversion, and FFmpeg integration.
+//!
+//! # Process
+//! 1. Capture frames from the renderer (BGRA format)
+//! 2. Convert BGRA to RGBA for image encoding
+//! 3. Save frames as temporary PNG files
+//! 4. Use FFmpeg to encode PNGs into MP4
+//! 5. Clean up temporary files
+//!
+//! # Requirements
+//! - FFmpeg must be installed and available in PATH
+//! - Sufficient disk space for temporary PNG files
+//!
+//! # Design Notes
+//! The module uses a two-stage process (PNG then MP4) for compatibility
+//! and quality. Direct piping to FFmpeg is possible but more complex
+//! and error-prone across different platforms.
+
 use std::{path::PathBuf, process::Command};
 use image::{ImageBuffer, Rgba};
 

@@ -1,3 +1,25 @@
+//! NPY file loading for physics simulation trajectories.
+//!
+//! This module handles loading and parsing of NumPy array files containing
+//! physics simulation data. It converts the flat array format into structured
+//! `Body` instances for rendering.
+//!
+//! # File Format
+//! The NPY files are expected to contain 2D arrays with shape (frames, bodies*18)
+//! where each body is represented by 18 float values:
+//! - Position (3 floats)
+//! - Velocity (3 floats)
+//! - Orientation quaternion (4 floats)
+//! - Angular velocity (3 floats)
+//! - Mass (1 float)
+//! - Shape type (1 float: 0=sphere, 2=box)
+//! - Shape parameters (3 floats: radius or half-extents)
+//!
+//! # Design
+//! The loader is implemented as a stateless utility struct following the
+//! static method pattern. This ensures thread safety and prevents unnecessary
+//! state management for what is essentially a data transformation operation.
+
 use crate::body::Body;
 use anyhow::{anyhow, Result};
 use std::path::Path;

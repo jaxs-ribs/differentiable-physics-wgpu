@@ -1,3 +1,26 @@
+//! Physics body representation for GPU-based simulations.
+//!
+//! This module defines the `Body` struct, which represents a physical object in the simulation.
+//! The struct is carefully designed to be GPU-compatible with specific memory alignment requirements
+//! for efficient data transfer between CPU and GPU. Each body contains position, velocity,
+//! orientation, angular velocity, mass properties, and shape information.
+//!
+//! The 112-byte aligned structure ensures optimal GPU memory access patterns and matches
+//! the layout expected by the physics compute shaders.
+//!
+//! # Memory Layout
+//! - Total size: 112 bytes (7 × 16-byte aligned chunks)
+//! - Alignment: 16 bytes (GPU requirement)
+//! - Pod + Zeroable: Safe for direct GPU buffer mapping
+//!
+//! # Shape Types
+//! - 0: Sphere (radius in shape_params[0])
+//! - 2: Box (half-extents in shape_params[0..3])
+//!
+//! # Flags (shape_data[1])
+//! - 0: Dynamic body (affected by physics)
+//! - 1: Static body (infinite mass, no movement)
+
 use bytemuck::{Pod, Zeroable};
 
 #[repr(C, align(16))]

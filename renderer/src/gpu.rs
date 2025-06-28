@@ -1,3 +1,20 @@
+//! GPU device and resource management using WebGPU.
+//!
+//! This module encapsulates GPU context initialization and provides a clean interface
+//! for creating GPU resources. It handles adapter selection, device creation, and
+//! provides utility methods for buffer creation.
+//!
+//! # Responsibilities
+//! - WebGPU instance and adapter initialization
+//! - Device and queue creation with appropriate limits
+//! - Buffer creation utilities
+//! - Power preference configuration (high performance for physics)
+//!
+//! # Design Notes
+//! Following the single responsibility principle, this module only handles GPU
+//! context management. Rendering pipelines, shaders, and scene-specific resources
+//! are managed by their respective modules.
+
 use wgpu::{Buffer, BufferUsages, util::DeviceExt};
 use anyhow::Result;
 

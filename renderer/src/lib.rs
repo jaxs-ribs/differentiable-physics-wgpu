@@ -1,3 +1,32 @@
+//! Physics simulation renderer with dual-scene visualization support.
+//!
+//! This is the main renderer module that orchestrates all rendering operations.
+//! It supports simultaneous visualization of two physics simulations (e.g., CPU
+//! oracle vs GPU implementation) for comparison and debugging purposes.
+//!
+//! # Architecture
+//! The renderer follows a modular design with clear separation of concerns:
+//! - `body`: Physics body data structures
+//! - `camera`: 3D camera controls and transformations
+//! - `gpu`: GPU context and device management
+//! - `mesh`: Wireframe geometry generation
+//! - `video`: Video recording functionality
+//! - `loader`: NPY file loading for trajectory data
+//!
+//! # Features
+//! - Dual-scene rendering for side-by-side comparison
+//! - Real-time camera controls (orbit, zoom)
+//! - Video capture to MP4
+//! - Efficient GPU-based rendering with WebGPU
+//! - Support for large simulations (1000+ bodies)
+//!
+//! # Design Philosophy
+//! Following Uncle Bob's Clean Architecture principles:
+//! - Single Responsibility: Each module has one clear purpose
+//! - Open/Closed: Extensible for new body types without modifying core
+//! - Dependency Inversion: Core renderer depends on abstractions (traits)
+//! - Interface Segregation: Minimal, focused public APIs
+
 pub mod body;
 pub mod camera;
 pub mod gpu;

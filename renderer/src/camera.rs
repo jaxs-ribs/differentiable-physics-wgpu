@@ -1,3 +1,22 @@
+//! Interactive 3D camera system with orbit controls.
+//!
+//! This module provides a spherical coordinate-based camera that orbits around a target point.
+//! The camera supports smooth rotation via mouse drag and zoom via scroll wheel, making it
+//! ideal for exploring 3D physics simulations from different angles.
+//!
+//! # Features
+//! - Orbit camera with spherical coordinates (radius, theta, phi)
+//! - Mouse-based rotation controls
+//! - Scroll wheel zoom
+//! - Automatic view-projection matrix calculation
+//! - Aspect ratio updates for window resizing
+//!
+//! # Coordinate System
+//! - Y-up right-handed coordinate system
+//! - Theta: Azimuthal angle (horizontal rotation)
+//! - Phi: Polar angle (vertical rotation, clamped to prevent gimbal lock)
+//! - Default view: 45° elevation angle looking along negative Z axis
+
 use glam::{Mat4, Vec3};
 
 const DEFAULT_FOV_DEGREES: f32 = 60.0;  // Wider FOV

@@ -1,3 +1,25 @@
+//! Main entry point for the physics renderer application.
+//!
+//! This module handles:
+//! - Command-line argument parsing
+//! - Window creation and event loop
+//! - User input handling (mouse, keyboard)
+//! - Frame timing and video recording
+//! - Coordination between loader, renderer, and video modules
+//!
+//! # Architecture
+//! The main function follows a clear initialization-loop-cleanup pattern:
+//! 1. Parse arguments and load trajectory data
+//! 2. Initialize GPU and rendering context
+//! 3. Run event loop with frame updates
+//! 4. Save video if recording was enabled
+//!
+//! # Event Handling
+//! - Mouse drag: Camera rotation
+//! - Mouse wheel: Camera zoom
+//! - Q/Escape: Exit application
+//! - Window resize: Update renderer viewport
+
 use clap::Parser;
 use physics_renderer::{
     body::Body,

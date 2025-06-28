@@ -1,3 +1,24 @@
+//! Wireframe geometry generation for physics visualization.
+//!
+//! This module is responsible for converting physics bodies into renderable
+//! wireframe geometry. It generates axis-aligned bounding boxes (AABBs) for
+//! each body and converts them into vertex data suitable for GPU rendering.
+//!
+//! # Features
+//! - AABB calculation for spheres and boxes
+//! - Color coding based on body properties (static vs dynamic)
+//! - Debug visualization modes for testing
+//! - Triangle-based line rendering for GPU efficiency
+//!
+//! # Debug Modes
+//! - `DEBUG_TRIANGLES`: Renders solid triangles instead of wireframes
+//! - `DEBUG_FULLSCREEN`: Renders a fullscreen triangle for testing
+//!
+//! # Design Notes
+//! The module uses triangle strips to render lines on the GPU, as modern
+//! GPUs are optimized for triangle rendering. Each "line" is actually two
+//! triangles forming a thin rectangle.
+
 use crate::body::Body;
 
 const STATIC_BODY_COLOR: [f32; 3] = [0.5, 0.5, 0.5]; // Gray
