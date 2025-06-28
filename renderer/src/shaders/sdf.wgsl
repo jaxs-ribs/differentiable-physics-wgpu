@@ -115,7 +115,11 @@ fn calculate_normal(p: vec3<f32>) -> vec3<f32> {
 fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // Convert fragment coordinates to UV coordinates
     let resolution = vec2<f32>(800.0, 600.0);
-    let uv = (frag_coord.xy - 0.5 * resolution) / resolution.y;
+    // Flip Y coordinate to match world space (Y-up)
+    let uv = vec2<f32>(
+        (frag_coord.x - 0.5 * resolution.x) / resolution.y,
+        -(frag_coord.y - 0.5 * resolution.y) / resolution.y
+    );
     
     // Hardcoded camera for headless mode
     let cam_pos = vec3<f32>(10.0, 10.0, 10.0);

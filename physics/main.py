@@ -2,7 +2,7 @@
 """Main entry point for physics simulation with numpy dump output."""
 import argparse
 import numpy as np
-from .types import create_body_array, ShapeType
+from .types import create_body_array, ShapeType, BodySchema
 from .engine import TensorPhysicsEngine
 
 def create_test_scene() -> list[np.ndarray]:
@@ -34,6 +34,52 @@ def create_test_scene() -> list[np.ndarray]:
   ))
   
   return bodies
+
+def transform_physics_to_renderer(physics_state: np.ndarray) -> np.ndarray:
+  """Transform physics engine state (27 properties) to renderer format (18 properties).
+  
+  Physics format (27 properties):
+  - Position (3), Velocity (3), Quaternion (4), Angular Velocity (3)
+  - Inverse Mass (1), Inverse Inertia Tensor (9), Shape Type (1), Shape Params (3)
+  
+  Renderer format (18 properties):
+  - Position (3), Velocity (3), Quaternion (4), Angular Velocity (3)
+  - Mass (1), Shape Type (1), Shape Params (3)
+  
+  Args:
+    physics_state: Array of shape (frames, bodies, 27) or (bodies, 27)
+    
+  Returns:
+    Array of shape (frames, bodies, 18) or (bodies, 18) for renderer
+  """
+  # Handle both 2D (bodies, properties) and 3D (frames, bodies, properties) inputs
+  if physics_state.ndim == 2:
+    # Single frame
+    num_bodies = physics_state.shape[0]
+    renderer_state = np.zeros((num_bodies, 18), dtype=np.float32)
+    
+    for i in range(num_bodies):
+      # Copy position, velocity, quaternion, angular velocity (indices 0-12)
+      renderer_state[i, 0:13] = physics_state[i, 0:13]
+      
+      # Convert inverse mass to mass (index 13 in physics -> index 13 in renderer)
+      inv_mass = physics_state[i, BodySchema.INV_MASS]
+      renderer_state[i, 13] = 1.0 / inv_mass if inv_mass > 0 else 1e8  # Large mass for static objects
+      
+      # Skip inverse inertia tensor (indices 14-22 in physics)
+      # Copy shape type and shape params (indices 23-26 in physics -> indices 14-17 in renderer)
+      renderer_state[i, 14:18] = physics_state[i, BodySchema.SHAPE_TYPE:BodySchema.SHAPE_PARAM_3+1]
+    
+    return renderer_state
+  else:
+    # Multiple frames
+    num_frames, num_bodies = physics_state.shape[0], physics_state.shape[1]
+    renderer_state = np.zeros((num_frames, num_bodies, 18), dtype=np.float32)
+    
+    for frame in range(num_frames):
+      renderer_state[frame] = transform_physics_to_renderer(physics_state[frame])
+    
+    return renderer_state
 
 def main():
   parser = argparse.ArgumentParser(description='Physics engine simulation with numpy dump output.')
@@ -87,13 +133,25 @@ def main():
       all_states = [initial_state, final_state]
   
   state_array = np.array(all_states)
+  print(f"Physics state array shape: {state_array.shape} (frames, bodies, properties)")
+  
+  # Transform from physics format (27 properties) to renderer format (18 properties)
+  renderer_state_array = transform_physics_to_renderer(state_array)
+  print(f"Transformed to renderer format: {renderer_state_array.shape}")
+  
+  # Reshape from (frames, bodies, properties) to (frames, bodies*properties) for renderer compatibility
+  num_frames, num_bodies, num_properties = renderer_state_array.shape
+  state_array_flat = renderer_state_array.reshape(num_frames, num_bodies * num_properties)
+  
   # Ensure output directory exists
   import os
-  os.makedirs(os.path.dirname(args.output), exist_ok=True)
-  np.save(args.output, state_array)
+  output_dir = os.path.dirname(args.output)
+  if output_dir:
+    os.makedirs(output_dir, exist_ok=True)
+  np.save(args.output, state_array_flat)
   
   print(f"\nCreated {args.output} with {len(bodies)} bodies.")
-  print(f"State array shape: {state_array.shape}")
+  print(f"Final output shape: {state_array_flat.shape} (flattened from {renderer_state_array.shape})")
   if args.mode == 'nstep':
     print(f"Simulation ran {args.steps} steps as a single JIT-compiled operation.")
     print("(Saved initial and final states only)")
@@ -103,7 +161,7 @@ def main():
     else:
       print(f"Simulation ran {args.steps} steps in single-step mode.")
       print("(Saved initial and final states only)")
-  print(f"Each state contains {len(bodies)} bodies with {state_array.shape[2]} properties each.")
+  print(f"Each body now has {num_properties} properties (transformed from {BodySchema.NUM_PROPERTIES} physics properties).")
 
 if __name__ == "__main__":
   main()

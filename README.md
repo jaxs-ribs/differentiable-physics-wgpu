@@ -29,6 +29,49 @@ pip install numpy  # TinyGrad is included as a submodule
 ./test
 ```
 
+## Visualization Pipeline
+
+### 1. Generate Physics Simulation Data
+
+```bash
+# Basic simulation (2 frames: initial and final)
+python3 scripts/run_physics.py --steps 200
+
+# Save all intermediate frames for smooth playback
+python3 scripts/run_physics.py --steps 100 --mode single --save-intermediate
+
+# Custom output location
+python3 scripts/run_physics.py --steps 500 --output artifacts/my_simulation.npy
+```
+
+### 2. Visualize with SDF Renderer
+
+```bash
+# Interactive visualization (use mouse to rotate, scroll to zoom)
+./renderer/target/release/renderer --oracle artifacts/oracle_dump.npy
+
+# Headless rendering to PNG
+./renderer/target/release/renderer --save-frame artifacts/simulation_frame.png
+
+# Record video (requires FFmpeg)
+# Generate physics simulation with many frames
+python3 physics/main.py --steps 420 --save-intermediate
+
+# Record at 60fps for smooth playback
+./renderer/target/release/renderer --oracle artifacts/test_420.npy --record artifacts/simulation.mp4 --fps 60
+```
+
+### 3. Compare Multiple Simulations
+
+```bash
+# Generate CPU and GPU simulations
+python3 scripts/run_physics.py --output artifacts/cpu_run.npy
+# (In future: generate GPU version)
+
+# Visualize both simultaneously (ghost overlay)
+./renderer/target/release/renderer --oracle artifacts/cpu_run.npy --gpu artifacts/gpu_run.npy
+```
+
 ## Key Features
 
 - **Pure Tensor Operations** - No NumPy in core physics modules
@@ -200,20 +243,25 @@ Note: Some unit tests require pytest. The core functionality is thoroughly teste
 
 ### Output Format
 
-The simulation outputs NumPy arrays with shape `(num_frames, num_bodies, 27)` where:
+The physics engine internally uses 27 properties per body, but automatically transforms the output to a renderer-compatible format with 18 properties per body.
+
+**Saved NPY Format**: `(num_frames, num_bodies * 18)` - flattened for renderer compatibility
 - `num_frames`: 2 (initial and final) or `steps+1` (with --save-intermediate)
 - `num_bodies`: Number of rigid bodies in the scene
-- `27`: Properties per body (see `physics/types.py:BodySchema` for details)
 
-Key properties include:
-- `[0:3]`: Position (x, y, z)
-- `[3:6]`: Velocity (vx, vy, vz)
-- `[6:10]`: Orientation quaternion (w, x, y, z)
-- `[10:13]`: Angular velocity
-- `[13]`: Inverse mass (0 for static bodies)
-- `[14:17]`: Inverse inertia tensor diagonal
-- `[17]`: Shape type (0=sphere, 1=box)
-- `[18:21]`: Shape parameters (radius for sphere, half-extents for box)
+**Per-body properties (18 values)**:
+1. Position (3): x, y, z world coordinates
+2. Velocity (3): vx, vy, vz
+3. Orientation (4): quaternion (w, x, y, z)
+4. Angular velocity (3): omega_x, omega_y, omega_z
+5. Mass (1): actual mass (converted from inverse mass)
+6. Shape type (1): 0=sphere, 2=box, 3=capsule
+7. Shape parameters (3):
+   - Sphere: radius, 0, 0
+   - Box: half_extent_x, half_extent_y, half_extent_z
+   - Capsule: half_height, radius, 0
+
+The transformation from physics format (27 properties) to renderer format (18 properties) removes the inverse inertia tensor and converts inverse mass to mass.
 
 ### Known Issues & Workarounds
 

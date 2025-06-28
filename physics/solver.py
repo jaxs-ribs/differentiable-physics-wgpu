@@ -86,8 +86,11 @@ def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Te
   # Project relative velocity onto normal
   v_rel_normal = (v_rel * contact_normals).sum(axis=1)  # (M,)
   
-  # Skip contacts that are separating (v_rel_normal > 0)
-  active_mask = contact_mask & (v_rel_normal <= 0)
+  # Skip contacts that are separating
+  # If normal points from B to A, and v_rel = v_a - v_b, then:
+  # v_rel_normal < 0 means bodies are approaching (need impulse)
+  # v_rel_normal > 0 means bodies are separating (skip)
+  active_mask = contact_mask & (v_rel_normal < 0)
   active_mask_3d = active_mask.unsqueeze(1).expand(-1, 3)
   
   # Calculate impulse magnitudes for all contacts
@@ -106,7 +109,9 @@ def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Te
   angular_term_b = (contact_normals * cross_product(ang_delta_b, r_b)).sum(axis=1)
   
   # Calculate impulse magnitudes
-  numerator = -(1 + restitution) * v_rel_normal
+  # Standard impulse formula: j = -(1 + e) * v_rel·n / (denominators)
+  # But we need to be careful about the sign convention
+  numerator = -(1.0 + restitution) * v_rel_normal
   denominator = inv_mass_a + inv_mass_b + angular_term_a + angular_term_b
   denominator = denominator.maximum(1e-6)  # Prevent division by zero
   j_magnitude = numerator / denominator

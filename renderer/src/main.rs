@@ -206,7 +206,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Duration::from_millis(16) // ~60 FPS for interactive mode
     };
     let mut last_update = Instant::now();
-    let max_frames = (recording_fps as f32 * args.duration) as usize;
+    let simulation_frames = oracle_trace.as_ref().map_or(0, |t| t.len()).max(gpu_trace.as_ref().map_or(0, |t| t.len()));
+    let max_frames = if recording {
+        simulation_frames // For recording, capture all simulation frames
+    } else {
+        (recording_fps as f32 * args.duration) as usize
+    };
 
     let mut mouse_pressed = false;
     let mut last_mouse_pos: PhysicalPosition<f64> = PhysicalPosition::new(0.0, 0.0);
@@ -227,7 +232,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if last_update.elapsed() >= frame_duration {
                     let num_frames = oracle_trace.as_ref().map_or(0, |t| t.len()).max(gpu_trace.as_ref().map_or(0, |t| t.len()));
                     if num_frames > 0 {
-                        current_frame = (current_frame + 1) % num_frames;
+                        if recording {
+                            // For recording, play through frames once
+                            current_frame = current_frame + 1;
+                            if current_frame >= num_frames {
+                                elwt.exit(); // Exit when we've played all frames
+                                return;
+                            }
+                        } else {
+                            // For interactive mode, loop frames
+                            current_frame = (current_frame + 1) % num_frames;
+                        }
                     }
                     
                     // Get bodies from current frame
