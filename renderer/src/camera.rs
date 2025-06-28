@@ -70,11 +70,19 @@ impl Camera {
     }
     
     fn calculate_eye_position(&self) -> Vec3 {
+        self.target + self.spherical_to_cartesian()
+    }
+    
+    fn spherical_to_cartesian(&self) -> Vec3 {
         let sin_phi = self.phi.sin();
+        let cos_phi = self.phi.cos();
+        let sin_theta = self.theta.sin();
+        let cos_theta = self.theta.cos();
+        
         Vec3::new(
-            self.target.x + self.radius * sin_phi * self.theta.cos(),
-            self.target.y + self.radius * self.phi.cos(),
-            self.target.z + self.radius * sin_phi * self.theta.sin(),
+            self.radius * sin_phi * cos_theta,
+            self.radius * cos_phi,
+            self.radius * sin_phi * sin_theta,
         )
     }
 }

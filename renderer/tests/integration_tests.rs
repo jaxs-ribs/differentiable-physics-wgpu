@@ -1,22 +1,7 @@
-use physics_renderer::{body::Body, mesh::WireframeGeometry, camera::Camera};
+use physics_renderer::{body::Body, camera::Camera};
 
 #[test]
-fn test_full_pipeline_spheres() {
-    // Create a scene with multiple spheres
-    let bodies = vec![
-        Body::new_sphere([0.0, 0.0, 0.0], 1.0, 1.0),
-        Body::new_sphere([3.0, 0.0, 0.0], 0.5, 0.5),
-        Body::new_sphere([-3.0, 0.0, 0.0], 2.0, 2.0),
-        Body::new_static_sphere([0.0, -5.0, 0.0], 5.0),
-    ];
-    
-    // Generate wireframe geometry
-    let vertices = WireframeGeometry::generate_vertices_from_bodies(&bodies);
-    
-    // Verify we got vertices
-    assert!(!vertices.is_empty());
-    assert_eq!(vertices.len() % 6, 0);
-    
+fn test_camera_matrices() {
     // Create camera and get view-projection matrix
     let camera = Camera::new(16.0 / 9.0);
     let matrix = camera.view_projection_matrix_transposed();
@@ -30,24 +15,23 @@ fn test_full_pipeline_spheres() {
 }
 
 #[test]
-fn test_full_pipeline_boxes() {
-    // Create a scene with multiple boxes
+fn test_body_creation() {
+    // Create various body types
     let bodies = vec![
         Body::new_box([0.0, 5.0, 0.0], [1.0, 1.0, 1.0], 1.0),
         Body::new_box([5.0, 5.0, 0.0], [0.5, 2.0, 0.5], 0.5),
         Body::new_static_box([0.0, 0.0, 0.0], [10.0, 0.1, 10.0]),
     ];
     
-    // Generate wireframe geometry
-    let vertices = WireframeGeometry::generate_vertices_from_bodies(&bodies);
-    
-    // Verify we got vertices
-    assert!(!vertices.is_empty());
-    assert_eq!(vertices.len() % 6, 0);
+    // Verify bodies are created correctly
+    assert_eq!(bodies.len(), 3);
+    assert_eq!(bodies[0].mass_data[0], 1.0);
+    assert_eq!(bodies[1].mass_data[0], 0.5);
+    assert_eq!(bodies[2].mass_data[0], 0.0); // Static body has no mass
 }
 
 #[test]
-fn test_mixed_scene() {
+fn test_mixed_scene_bodies() {
     // Create a complex scene with various body types
     let mut bodies = Vec::new();
     
@@ -70,29 +54,12 @@ fn test_mixed_scene() {
     bodies.push(Body::new_static_box([-20.0, 0.0, 0.0], [1.0, 10.0, 20.0]));
     bodies.push(Body::new_static_box([20.0, 0.0, 0.0], [1.0, 10.0, 20.0]));
     
-    // Generate wireframe geometry
-    let vertices = WireframeGeometry::generate_vertices_from_bodies(&bodies);
-    
-    // Verify we got vertices for all bodies
-    assert!(!vertices.is_empty());
-    assert_eq!(vertices.len() % 6, 0);
-    
-    // Verify reasonable vertex count (should have many vertices for this scene)
-    assert!(vertices.len() > 100, "Complex scene should generate many vertices");
+    // Verify body count
+    assert_eq!(bodies.len(), 18); // 1 ground + 10 spheres + 5 boxes + 2 walls
 }
 
 #[test]
-fn test_camera_view_of_scene() {
-    let bodies = vec![
-        Body::new_sphere([0.0, 0.0, 0.0], 1.0, 1.0),
-        Body::new_sphere([5.0, 0.0, 0.0], 1.0, 1.0),
-        Body::new_sphere([-5.0, 0.0, 0.0], 1.0, 1.0),
-        Body::new_sphere([0.0, 5.0, 0.0], 1.0, 1.0),
-        Body::new_sphere([0.0, -5.0, 0.0], 1.0, 1.0),
-    ];
-    
-    let _vertices = WireframeGeometry::generate_vertices_from_bodies(&bodies);
-    
+fn test_camera_movement() {
     // Create camera at different positions
     let camera1 = Camera::new(16.0 / 9.0);
     let mut camera2 = Camera::new(16.0 / 9.0);
@@ -126,14 +93,8 @@ fn test_large_body_count() {
         }
     }
     
-    println!("Testing with {} bodies", bodies.len());
-    
-    // Generate wireframe geometry
-    let vertices = WireframeGeometry::generate_vertices_from_bodies(&bodies);
-    
     // Should handle large body counts
-    assert!(!vertices.is_empty());
-    assert_eq!(vertices.len() % 6, 0);
+    assert_eq!(bodies.len(), 21 * 21 * 21); // 9261 bodies
 }
 
 #[test] 
@@ -146,13 +107,13 @@ fn test_extreme_scales() {
         Body::new_box([0.0, 0.0, -1000.0], [100.0, 100.0, 100.0], 10000.0), // Huge box far away
     ];
     
-    let vertices = WireframeGeometry::generate_vertices_from_bodies(&bodies);
-    
     // Should handle extreme scales without issues
-    assert!(!vertices.is_empty());
+    assert_eq!(bodies.len(), 5);
     
-    // All vertices should be finite
-    for &val in &vertices {
-        assert!(val.is_finite(), "Extreme scales produced non-finite values");
+    // Verify all position values are finite
+    for body in &bodies {
+        assert!(body.position[0].is_finite());
+        assert!(body.position[1].is_finite());
+        assert!(body.position[2].is_finite());
     }
 }

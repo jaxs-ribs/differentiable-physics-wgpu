@@ -19,16 +19,16 @@ struct Body {
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
-    // Full-screen triangle
-    var pos: vec2<f32>;
-    if (vertex_index == 0u) {
-        pos = vec2<f32>(-1.0, -1.0);
-    } else if (vertex_index == 1u) {
-        pos = vec2<f32>(3.0, -1.0);
-    } else {
-        pos = vec2<f32>(-1.0, 3.0);
+    let pos = get_fullscreen_triangle_position(vertex_index);
+    return vec4<f32>(pos, 0.0, 1.0);
+}
+
+fn get_fullscreen_triangle_position(vertex_index: u32) -> vec2<f32> {
+    switch vertex_index {
+        case 0u: { return vec2<f32>(-1.0, -1.0); }
+        case 1u: { return vec2<f32>(3.0, -1.0); }
+        default: { return vec2<f32>(-1.0, 3.0); }
     }
-    return vec4<f32>(pos.x, pos.y, 0.0, 1.0);
 }
 
 // SDF for sphere
@@ -60,41 +60,59 @@ fn rotate_vector(v: vec3<f32>, q: vec4<f32>) -> vec3<f32> {
     return v + qw * t + cross(qxyz, t);
 }
 
-// Map the entire scene
+const SHAPE_SPHERE: u32 = 0u;
+const SHAPE_BOX: u32 = 2u;
+const SHAPE_CAPSULE: u32 = 3u;
+const MAX_DISTANCE: f32 = 1000000.0;
+
 fn map_scene(p: vec3<f32>) -> f32 {
-    var min_dist = 1000000.0;
-    
-    // Loop through all bodies
+    var min_dist = MAX_DISTANCE;
     let num_bodies = arrayLength(&bodies);
+    
     for (var i: u32 = 0u; i < num_bodies; i = i + 1u) {
-        let body = bodies[i];
-        let pos = body.position.xyz;
-        let shape_type = body.shape_data.x;
-        
-        // Transform point to body's local space
-        let local_p = rotate_vector(p - pos, vec4<f32>(-body.orientation.x, -body.orientation.y, -body.orientation.z, body.orientation.w));
-        
-        var dist = 1000000.0;
-        
-        // Calculate SDF based on shape type
-        if (shape_type == 0u) { // Sphere
-            // Sphere is rotation-invariant, so we can use world space directly
-            dist = sdSphere(p, pos, body.shape_params.x);
-        } else if (shape_type == 2u) { // Box
-            let half_extents = body.shape_params.xyz;
-            // Box SDF is calculated in local space
-            dist = sdBox(local_p, vec3<f32>(0.0), half_extents);
-        } else if (shape_type == 3u) { // Capsule
-            let half_height = body.shape_params.x;
-            let radius = body.shape_params.y;
-            // Capsule SDF is calculated in local space
-            dist = sdCapsule(local_p, vec3<f32>(0.0), half_height, radius);
-        }
-        
+        let dist = evaluate_body_sdf(p, bodies[i]);
         min_dist = min(min_dist, dist);
     }
     
     return min_dist;
+}
+
+fn evaluate_body_sdf(p: vec3<f32>, body: Body) -> f32 {
+    let shape_type = body.shape_data.x;
+    
+    if (shape_type == SHAPE_SPHERE) {
+        return evaluate_sphere(p, body);
+    } else if (shape_type == SHAPE_BOX) {
+        return evaluate_box(p, body);
+    } else if (shape_type == SHAPE_CAPSULE) {
+        return evaluate_capsule(p, body);
+    }
+    
+    return MAX_DISTANCE;
+}
+
+fn evaluate_sphere(p: vec3<f32>, body: Body) -> f32 {
+    return sdSphere(p, body.position.xyz, body.shape_params.x);
+}
+
+fn evaluate_box(p: vec3<f32>, body: Body) -> f32 {
+    let local_p = world_to_local(p, body);
+    return sdBox(local_p, vec3<f32>(0.0), body.shape_params.xyz);
+}
+
+fn evaluate_capsule(p: vec3<f32>, body: Body) -> f32 {
+    let local_p = world_to_local(p, body);
+    return sdCapsule(local_p, vec3<f32>(0.0), body.shape_params.x, body.shape_params.y);
+}
+
+fn world_to_local(p: vec3<f32>, body: Body) -> vec3<f32> {
+    let translated = p - body.position.xyz;
+    let inverse_rotation = conjugate_quaternion(body.orientation);
+    return rotate_vector(translated, inverse_rotation);
+}
+
+fn conjugate_quaternion(q: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(-q.x, -q.y, -q.z, q.w);
 }
 
 // Calculate normal using finite differences
@@ -111,57 +129,91 @@ fn calculate_normal(p: vec3<f32>) -> vec3<f32> {
     ));
 }
 
+const RESOLUTION: vec2<f32> = vec2<f32>(800.0, 600.0);
+const RAYMARCH_MAX_STEPS: i32 = 64;
+const RAYMARCH_MIN_DIST: f32 = 0.001;
+const RAYMARCH_MAX_DIST: f32 = 100.0;
+const RAYMARCH_START_DIST: f32 = 0.1;
+const BACKGROUND_COLOR: vec3<f32> = vec3<f32>(0.1, 0.2, 0.3);
+
 @fragment
 fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    // Convert fragment coordinates to UV coordinates
-    let resolution = vec2<f32>(800.0, 600.0);
-    // Flip Y coordinate to match world space (Y-up)
-    let uv = vec2<f32>(
-        (frag_coord.x - 0.5 * resolution.x) / resolution.y,
-        -(frag_coord.y - 0.5 * resolution.y) / resolution.y
-    );
+    let uv = screen_to_uv(frag_coord.xy);
+    let ray = generate_camera_ray(uv);
+    let hit_info = raymarch(ray.origin, ray.direction);
     
-    // Hardcoded camera for headless mode
+    return shade_pixel(hit_info);
+}
+
+struct Ray {
+    origin: vec3<f32>,
+    direction: vec3<f32>,
+}
+
+struct HitInfo {
+    hit: bool,
+    position: vec3<f32>,
+}
+
+fn screen_to_uv(screen_pos: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(
+        (screen_pos.x - 0.5 * RESOLUTION.x) / RESOLUTION.y,
+        -(screen_pos.y - 0.5 * RESOLUTION.y) / RESOLUTION.y
+    );
+}
+
+fn generate_camera_ray(uv: vec2<f32>) -> Ray {
     let cam_pos = vec3<f32>(10.0, 10.0, 10.0);
     let cam_target = vec3<f32>(0.0, 0.0, 0.0);
+    let camera_matrix = build_camera_matrix(cam_pos, cam_target);
     
-    // Calculate camera basis vectors
-    let forward = normalize(cam_target - cam_pos);
+    return Ray(
+        cam_pos,
+        normalize(camera_matrix.forward + uv.x * camera_matrix.right + uv.y * camera_matrix.up)
+    );
+}
+
+struct CameraMatrix {
+    forward: vec3<f32>,
+    right: vec3<f32>,
+    up: vec3<f32>,
+}
+
+fn build_camera_matrix(position: vec3<f32>, target: vec3<f32>) -> CameraMatrix {
+    let forward = normalize(target - position);
     let world_up = vec3<f32>(0.0, 1.0, 0.0);
     let right = normalize(cross(world_up, forward));
     let up = normalize(cross(forward, right));
     
-    // Generate ray
-    let ray_origin = cam_pos;
-    let ray_dir = normalize(forward + uv.x * right + uv.y * up);
+    return CameraMatrix(forward, right, up);
+}
+
+fn raymarch(origin: vec3<f32>, direction: vec3<f32>) -> HitInfo {
+    var t = RAYMARCH_START_DIST;
     
-    // Raymarch
-    var t = 0.1;
-    var hit = false;
-    var hit_pos = vec3<f32>(0.0);
-    
-    for (var i = 0; i < 64; i = i + 1) {
-        let p = ray_origin + ray_dir * t;
+    for (var i = 0; i < RAYMARCH_MAX_STEPS; i = i + 1) {
+        let p = origin + direction * t;
         let d = map_scene(p);
         
-        if (d < 0.001) {
-            hit = true;
-            hit_pos = p;
-            break;
+        if (d < RAYMARCH_MIN_DIST) {
+            return HitInfo(true, p);
         }
         
         t = t + d;
-        if (t > 100.0) {
+        if (t > RAYMARCH_MAX_DIST) {
             break;
         }
     }
     
-    // Color based on hit
-    if (hit) {
-        let normal = calculate_normal(hit_pos);
-        let color = abs(normal); // Use absolute value of normal as color
+    return HitInfo(false, vec3<f32>(0.0));
+}
+
+fn shade_pixel(hit_info: HitInfo) -> vec4<f32> {
+    if (hit_info.hit) {
+        let normal = calculate_normal(hit_info.position);
+        let color = abs(normal);
         return vec4<f32>(color, 1.0);
     } else {
-        return vec4<f32>(0.1, 0.2, 0.3, 1.0); // Background color
+        return vec4<f32>(BACKGROUND_COLOR, 1.0);
     }
 }

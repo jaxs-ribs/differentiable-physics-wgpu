@@ -108,36 +108,62 @@ impl Renderer {
     
     /// Renders the current frame to the display surface.
     pub fn render(&self, gpu: &GpuContext) -> Result<(), wgpu::SurfaceError> {
-        let output = if let Some(ref surface) = self.surface {
-            Some(surface.get_current_texture()?)
-        } else {
-            None
-        };
+        let output = self.acquire_surface_texture()?;
         
         self.update_uniform_buffer(gpu);
-
+        let commands = self.encode_render_commands(gpu, &output);
+        let _submission = self.submit_and_wait(gpu, commands);
+        
+        self.present_frame(output);
+        Ok(())
+    }
+    
+    fn acquire_surface_texture(&self) -> Result<Option<wgpu::SurfaceTexture>, wgpu::SurfaceError> {
+        match &self.surface {
+            Some(surface) => Ok(Some(surface.get_current_texture()?)),
+            None => Ok(None),
+        }
+    }
+    
+    fn encode_render_commands(
+        &self,
+        gpu: &GpuContext,
+        output: &Option<wgpu::SurfaceTexture>,
+    ) -> wgpu::CommandBuffer {
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Render Encoder"),
         });
         
-        if let Some(ref capture) = self.capture_resources {
-            self.encode_render_pass(&mut encoder, &capture.view);
-        } else if let Some(ref output) = output {
-            let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-            self.encode_render_pass(&mut encoder, &view);
-        }
+        let view = self.get_render_target_view(output);
+        self.encode_render_pass(&mut encoder, &view);
         
-        let submission = gpu.queue.submit(Some(encoder.finish()));
+        encoder.finish()
+    }
+    
+    fn get_render_target_view(&self, output: &Option<wgpu::SurfaceTexture>) -> wgpu::TextureView {
+        if let Some(ref output) = output {
+            output.texture.create_view(&wgpu::TextureViewDescriptor::default())
+        } else if let Some(ref capture) = self.capture_resources {
+            capture.texture.create_view(&wgpu::TextureViewDescriptor::default())
+        } else {
+            panic!("No render target available");
+        }
+    }
+    
+    fn submit_and_wait(&self, gpu: &GpuContext, commands: wgpu::CommandBuffer) -> wgpu::SubmissionIndex {
+        let submission = gpu.queue.submit(Some(commands));
         
         if self.capture_resources.is_some() {
-            gpu.device.poll(wgpu::MaintainBase::WaitForSubmissionIndex(submission));
+            gpu.device.poll(wgpu::MaintainBase::Wait);
         }
         
+        submission
+    }
+    
+    fn present_frame(&self, output: Option<wgpu::SurfaceTexture>) {
         if let Some(output) = output {
             output.present();
         }
-        
-        Ok(())
     }
     
     /// Renders to texture for headless capture.
@@ -154,32 +180,64 @@ impl Renderer {
     pub fn capture_frame(&self, gpu: &GpuContext) -> Option<Vec<u8>> {
         let capture = self.capture_resources.as_ref()?;
         
-        copy_texture_to_buffer(gpu, &capture, &self.config);
-        let data = read_buffer_data(gpu, &capture.staging_buffer)?;
+        self.copy_rendered_frame_to_buffer(gpu, capture);
+        let raw_data = self.read_frame_from_buffer(gpu, &capture.staging_buffer)?;
         
-        Some(extract_frame_data(
-            &data,
+        Some(self.extract_frame_pixels(&raw_data, capture.bytes_per_row))
+    }
+    
+    fn copy_rendered_frame_to_buffer(&self, gpu: &GpuContext, capture: &CaptureResources) {
+        copy_texture_to_buffer(gpu, capture, &self.config);
+    }
+    
+    fn read_frame_from_buffer(
+        &self,
+        gpu: &GpuContext,
+        buffer: &wgpu::Buffer,
+    ) -> Option<Vec<u8>> {
+        let view = read_buffer_data(gpu, buffer)?;
+        Some(view.to_vec())
+    }
+    
+    fn extract_frame_pixels(&self, raw_data: &[u8], bytes_per_row: u32) -> Vec<u8> {
+        extract_frame_data(
+            raw_data,
             self.config.width,
             self.config.height,
-            capture.bytes_per_row,
-        ))
+            bytes_per_row,
+        )
     }
     
     /// Handles window resize events.
     pub fn resize(&mut self, gpu: &GpuContext, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width == 0 || new_size.height == 0 {
+        if !self.is_valid_size(new_size) {
             return;
         }
         
+        self.update_config_size(new_size);
+        self.reconfigure_surface(gpu);
+        self.update_camera_aspect_ratio();
+        self.update_uniform_buffer(gpu);
+    }
+    
+    fn is_valid_size(&self, size: winit::dpi::PhysicalSize<u32>) -> bool {
+        size.width > 0 && size.height > 0
+    }
+    
+    fn update_config_size(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         self.config.width = new_size.width;
         self.config.height = new_size.height;
-        
+    }
+    
+    fn reconfigure_surface(&self, gpu: &GpuContext) {
         if let Some(ref surface) = self.surface {
             surface.configure(&gpu.device, &self.config);
         }
-        
-        self.camera.update_aspect_ratio(self.config.width as f32 / self.config.height as f32);
-        self.update_uniform_buffer(gpu);
+    }
+    
+    fn update_camera_aspect_ratio(&mut self) {
+        let aspect_ratio = self.config.width as f32 / self.config.height as f32;
+        self.camera.update_aspect_ratio(aspect_ratio);
     }
     
     /// Returns mutable camera for user interaction.
@@ -295,29 +353,53 @@ fn create_gpu_resources(
     camera: &Camera,
     surface_format: wgpu::TextureFormat,
 ) -> Result<GpuResources, Box<dyn std::error::Error>> {
-    let view_projection_buffer = create_uniform_buffer(gpu, camera);
-    let bodies_buffer = create_bodies_buffer(gpu);
-    let bind_group_layout = create_bind_group_layout(gpu);
-    let bind_group = create_bind_group(
-        gpu,
-        &bind_group_layout,
-        &view_projection_buffer,
-        &bodies_buffer,
-    );
-    
-    let shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("SDF Shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sdf.wgsl").into()),
-    });
-    
-    let pipeline = create_render_pipeline(gpu, &shader, &bind_group_layout, surface_format);
+    let buffers = create_gpu_buffers(gpu, camera);
+    let shader = load_sdf_shader(gpu);
+    let bind_group = create_resource_bindings(gpu, &buffers);
+    let pipeline = create_render_pipeline(gpu, &shader, &bind_group.layout, surface_format);
     
     Ok(GpuResources {
         pipeline,
-        bodies_buffer,
-        view_projection_buffer,
-        bind_group,
+        bodies_buffer: buffers.bodies,
+        view_projection_buffer: buffers.view_projection,
+        bind_group: bind_group.group,
     })
+}
+
+struct GpuBuffers {
+    view_projection: wgpu::Buffer,
+    bodies: wgpu::Buffer,
+}
+
+struct ResourceBindings {
+    layout: wgpu::BindGroupLayout,
+    group: wgpu::BindGroup,
+}
+
+fn create_gpu_buffers(gpu: &GpuContext, camera: &Camera) -> GpuBuffers {
+    GpuBuffers {
+        view_projection: create_uniform_buffer(gpu, camera),
+        bodies: create_bodies_buffer(gpu),
+    }
+}
+
+fn load_sdf_shader(gpu: &GpuContext) -> wgpu::ShaderModule {
+    gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("SDF Shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sdf.wgsl").into()),
+    })
+}
+
+fn create_resource_bindings(gpu: &GpuContext, buffers: &GpuBuffers) -> ResourceBindings {
+    let layout = create_bind_group_layout(gpu);
+    let group = create_bind_group(
+        gpu,
+        &layout,
+        &buffers.view_projection,
+        &buffers.bodies,
+    );
+    
+    ResourceBindings { layout, group }
 }
 
 fn create_uniform_buffer(gpu: &GpuContext, camera: &Camera) -> wgpu::Buffer {
@@ -537,14 +619,29 @@ fn extract_frame_data(
     height: u32,
     bytes_per_row: u32,
 ) -> Vec<u8> {
-    let mut frame_data = Vec::with_capacity((width * height * 4) as usize);
-    let unpadded_bytes_per_row = width * 4;
+    let mut frame_data = Vec::with_capacity(calculate_frame_size(width, height));
     
     for y in 0..height {
-        let row_start = (y * bytes_per_row) as usize;
-        let row_end = row_start + unpadded_bytes_per_row as usize;
-        frame_data.extend_from_slice(&data[row_start..row_end]);
+        append_row_data(&mut frame_data, data, y, width, bytes_per_row);
     }
     
     frame_data
+}
+
+fn calculate_frame_size(width: u32, height: u32) -> usize {
+    (width * height * 4) as usize
+}
+
+fn append_row_data(
+    frame_data: &mut Vec<u8>,
+    source_data: &[u8],
+    row: u32,
+    width: u32,
+    padded_bytes_per_row: u32,
+) {
+    let row_start = (row * padded_bytes_per_row) as usize;
+    let row_bytes = (width * 4) as usize;
+    let row_end = row_start + row_bytes;
+    
+    frame_data.extend_from_slice(&source_data[row_start..row_end]);
 }

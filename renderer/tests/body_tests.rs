@@ -1,5 +1,4 @@
 use physics_renderer::body::Body;
-use bytemuck::{Pod, Zeroable};
 
 #[test]
 fn test_body_size_and_alignment() {

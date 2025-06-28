@@ -28,61 +28,55 @@ const FLAG_STATIC: u32 = 1;
 
 impl Body {
     pub fn new_sphere(position: [f32; 3], radius: f32, mass: f32) -> Self {
-        Self::new_body(
-            position,
-            mass,
-            SHAPE_SPHERE,
-            0,
-            [radius, 0.0, 0.0, 0.0],
-        )
+        Self::create_sphere(position, radius, mass, false)
     }
     
     pub fn new_static_sphere(position: [f32; 3], radius: f32) -> Self {
+        Self::create_sphere(position, radius, 0.0, true)
+    }
+    
+    pub fn new_box(position: [f32; 3], half_extents: [f32; 3], mass: f32) -> Self {
+        Self::create_box(position, half_extents, mass, false)
+    }
+    
+    pub fn new_static_box(position: [f32; 3], half_extents: [f32; 3]) -> Self {
+        Self::create_box(position, half_extents, 0.0, true)
+    }
+    
+    pub fn new_capsule(position: [f32; 3], half_height: f32, radius: f32, mass: f32) -> Self {
+        Self::create_capsule(position, half_height, radius, mass, false)
+    }
+    
+    pub fn new_static_capsule(position: [f32; 3], half_height: f32, radius: f32) -> Self {
+        Self::create_capsule(position, half_height, radius, 0.0, true)
+    }
+    
+    fn create_sphere(position: [f32; 3], radius: f32, mass: f32, is_static: bool) -> Self {
         Self::new_body(
             position,
-            0.0,
+            mass,
             SHAPE_SPHERE,
-            FLAG_STATIC,
+            if is_static { FLAG_STATIC } else { 0 },
             [radius, 0.0, 0.0, 0.0],
         )
     }
     
-    pub fn new_box(position: [f32; 3], half_extents: [f32; 3], mass: f32) -> Self {
+    fn create_box(position: [f32; 3], half_extents: [f32; 3], mass: f32, is_static: bool) -> Self {
         Self::new_body(
             position,
             mass,
             SHAPE_BOX,
-            0,
+            if is_static { FLAG_STATIC } else { 0 },
             [half_extents[0], half_extents[1], half_extents[2], 0.0],
         )
     }
     
-    pub fn new_static_box(position: [f32; 3], half_extents: [f32; 3]) -> Self {
-        Self::new_body(
-            position,
-            0.0,
-            SHAPE_BOX,
-            FLAG_STATIC,
-            [half_extents[0], half_extents[1], half_extents[2], 0.0],
-        )
-    }
-    
-    pub fn new_capsule(position: [f32; 3], half_height: f32, radius: f32, mass: f32) -> Self {
+    fn create_capsule(position: [f32; 3], half_height: f32, radius: f32, mass: f32, is_static: bool) -> Self {
         Self::new_body(
             position,
             mass,
             SHAPE_CAPSULE,
-            0,
-            [half_height, radius, 0.0, 0.0],
-        )
-    }
-    
-    pub fn new_static_capsule(position: [f32; 3], half_height: f32, radius: f32) -> Self {
-        Self::new_body(
-            position,
-            0.0,
-            SHAPE_CAPSULE,
-            FLAG_STATIC,
+            if is_static { FLAG_STATIC } else { 0 },
             [half_height, radius, 0.0, 0.0],
         )
     }
@@ -95,15 +89,28 @@ impl Body {
         shape_params: [f32; 4],
     ) -> Self {
         Self {
-            position: [position[0], position[1], position[2], 0.0],
+            position: pad_vec3(position),
             velocity: [0.0; 4],
-            orientation: [1.0, 0.0, 0.0, 0.0], // identity quaternion (w,x,y,z)
+            orientation: identity_quaternion(),
             angular_vel: [0.0; 4],
-            mass_data: [mass, if mass > 0.0 { 1.0 / mass } else { 0.0 }, 0.0, 0.0],
+            mass_data: compute_mass_data(mass),
             shape_data: [shape_type, flags, 0, 0],
             shape_params,
         }
     }
+}
+
+fn pad_vec3(v: [f32; 3]) -> [f32; 4] {
+    [v[0], v[1], v[2], 0.0]
+}
+
+fn identity_quaternion() -> [f32; 4] {
+    [1.0, 0.0, 0.0, 0.0]
+}
+
+fn compute_mass_data(mass: f32) -> [f32; 4] {
+    let inverse_mass = if mass > 0.0 { 1.0 / mass } else { 0.0 };
+    [mass, inverse_mass, 0.0, 0.0]
 }
 
 

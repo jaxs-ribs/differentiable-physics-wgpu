@@ -86,45 +86,17 @@ impl TrajectoryLoader {
     
     /// Extract bodies for a specific frame
     pub fn get_bodies_at_frame(run: &TrajectoryRun, frame_index: usize) -> Result<Vec<Body>> {
-        if frame_index >= run.num_frames {
-            return Err(anyhow!(
-                "Frame index {} out of bounds (max: {})", 
-                frame_index, 
-                run.num_frames - 1
-            ));
-        }
+        validate_frame_index(frame_index, run.num_frames)?;
         
         let mut bodies = Vec::with_capacity(run.num_bodies);
         let floats_per_body = 18;
-        let data_per_frame = run.num_bodies * floats_per_body;
+        let frame_offset = calculate_frame_offset(frame_index, run.num_bodies, floats_per_body);
         
         for body_idx in 0..run.num_bodies {
-            let frame_offset = frame_index * data_per_frame;
             let body_offset = body_idx * floats_per_body;
             let offset = frame_offset + body_offset;
-            
-            let position = [run.data[offset], run.data[offset + 1], run.data[offset + 2], 0.0];
-            let velocity = [run.data[offset + 3], run.data[offset + 4], run.data[offset + 5], 0.0];
-            let orientation = [
-                run.data[offset + 6],
-                run.data[offset + 7],
-                run.data[offset + 8],
-                run.data[offset + 9],
-            ];
-            let angular_vel = [run.data[offset + 10], run.data[offset + 11], run.data[offset + 12], 0.0];
-            let mass = run.data[offset + 13];
-            let shape_type = run.data[offset + 14] as u32;
-            let shape_params = [run.data[offset + 15], run.data[offset + 16], run.data[offset + 17], 0.0];
-            
-            bodies.push(Body {
-                position,
-                velocity,
-                orientation,
-                angular_vel,
-                mass_data: [mass, if mass > 0.0 { 1.0 / mass } else { 0.0 }, 0.0, 0.0],
-                shape_data: [shape_type, 0, 0, 0],
-                shape_params,
-            });
+            let body = parse_body_at_offset(&run.data, offset);
+            bodies.push(body);
         }
         
         Ok(bodies)
@@ -153,6 +125,54 @@ pub struct RunMetadata {
     pub num_frames: usize,
     pub num_bodies: usize,
     pub duration_seconds: f32,
+}
+
+fn validate_frame_index(frame_index: usize, num_frames: usize) -> Result<()> {
+    if frame_index >= num_frames {
+        return Err(anyhow!(
+            "Frame index {} out of bounds (max: {})", 
+            frame_index, 
+            num_frames - 1
+        ));
+    }
+    Ok(())
+}
+
+fn calculate_frame_offset(frame_index: usize, num_bodies: usize, floats_per_body: usize) -> usize {
+    frame_index * num_bodies * floats_per_body
+}
+
+fn parse_body_at_offset(data: &[f32], offset: usize) -> Body {
+    let position = extract_vec3(data, offset);
+    let velocity = extract_vec3(data, offset + 3);
+    let orientation = extract_vec4(data, offset + 6);
+    let angular_vel = extract_vec3(data, offset + 10);
+    let mass = data[offset + 13];
+    let shape_type = data[offset + 14] as u32;
+    let shape_params = extract_vec3(data, offset + 15);
+    
+    Body {
+        position,
+        velocity,
+        orientation,
+        angular_vel,
+        mass_data: compute_mass_data(mass),
+        shape_data: [shape_type, 0, 0, 0],
+        shape_params,
+    }
+}
+
+fn extract_vec3(data: &[f32], offset: usize) -> [f32; 4] {
+    [data[offset], data[offset + 1], data[offset + 2], 0.0]
+}
+
+fn extract_vec4(data: &[f32], offset: usize) -> [f32; 4] {
+    [data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]
+}
+
+fn compute_mass_data(mass: f32) -> [f32; 4] {
+    let inverse_mass = if mass > 0.0 { 1.0 / mass } else { 0.0 };
+    [mass, inverse_mass, 0.0, 0.0]
 }
 
 #[cfg(test)]

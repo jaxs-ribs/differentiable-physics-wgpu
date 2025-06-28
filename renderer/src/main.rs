@@ -24,7 +24,7 @@ use clap::Parser;
 use physics_renderer::{
     body::Body,
     gpu::GpuContext,
-    loader::TrajectoryLoader,
+    loader::{TrajectoryLoader, TrajectoryRun},
     video::save_frames_as_video,
     Renderer,
 };
@@ -195,21 +195,37 @@ struct ApplicationState {
 fn run_headless(output_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     println!("Running in headless mode, saving frame to: {}", output_path.display());
     
+    let (gpu_context, mut renderer) = initialize_headless_renderer()?;
+    render_test_scene(&gpu_context, &mut renderer);
+    capture_and_save_frame(&gpu_context, &renderer, &output_path)?;
+    
+    Ok(())
+}
+
+fn initialize_headless_renderer() -> Result<(GpuContext, Renderer), Box<dyn std::error::Error>> {
     let gpu_context = pollster::block_on(GpuContext::new())?;
-    let mut renderer = pollster::block_on(Renderer::new(None, &gpu_context, true))?;
-    
+    let renderer = pollster::block_on(Renderer::new(None, &gpu_context, true))?;
+    Ok((gpu_context, renderer))
+}
+
+fn render_test_scene(gpu_context: &GpuContext, renderer: &mut Renderer) {
     let test_bodies = create_test_scene();
-    renderer.update(&gpu_context, &test_bodies);
-    renderer.render_to_texture(&gpu_context);
+    renderer.update(gpu_context, &test_bodies);
+    renderer.render_to_texture(gpu_context);
+}
+
+fn capture_and_save_frame(
+    gpu_context: &GpuContext,
+    renderer: &Renderer,
+    output_path: &PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let frame_data = renderer.capture_frame(gpu_context)
+        .ok_or("Frame capture failed")?;
     
-    if let Some(frame_data) = renderer.capture_frame(&gpu_context) {
-        let rgba_data = convert_bgra_to_rgba(&frame_data, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
-        save_frame_as_png(&output_path, &rgba_data, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)?;
-        println!("✅ SDF frame saved to {}", output_path.display());
-    } else {
-        return Err("Frame capture failed".into());
-    }
+    let rgba_data = convert_bgra_to_rgba(&frame_data, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+    save_frame_as_png(output_path, &rgba_data, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)?;
     
+    println!("✅ SDF frame saved to {}", output_path.display());
     Ok(())
 }
 
@@ -222,14 +238,22 @@ fn create_test_scene() -> Vec<Body> {
 }
 
 fn convert_bgra_to_rgba(bgra_data: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let pixel_count = (width * height) as usize;
     let mut rgba_data = vec![0u8; bgra_data.len()];
-    for i in 0..(width * height) as usize {
-        rgba_data[i * 4] = bgra_data[i * 4 + 2];     // R
-        rgba_data[i * 4 + 1] = bgra_data[i * 4 + 1]; // G
-        rgba_data[i * 4 + 2] = bgra_data[i * 4];     // B
-        rgba_data[i * 4 + 3] = bgra_data[i * 4 + 3]; // A
+    
+    for i in 0..pixel_count {
+        let offset = i * 4;
+        copy_pixel_bgra_to_rgba(&bgra_data[offset..], &mut rgba_data[offset..]);
     }
+    
     rgba_data
+}
+
+fn copy_pixel_bgra_to_rgba(bgra_pixel: &[u8], rgba_pixel: &mut [u8]) {
+    rgba_pixel[0] = bgra_pixel[2]; // R <- B
+    rgba_pixel[1] = bgra_pixel[1]; // G <- G
+    rgba_pixel[2] = bgra_pixel[0]; // B <- R
+    rgba_pixel[3] = bgra_pixel[3]; // A <- A
 }
 
 fn save_frame_as_png(
@@ -254,20 +278,30 @@ fn load_trace_file(
     path: &Option<PathBuf>,
     trace_type: &str,
 ) -> Result<Option<Vec<Vec<Body>>>, Box<dyn std::error::Error>> {
-    match path {
-        Some(path) => {
-            println!("👁️  Loading {} trace from: {}", trace_type, path.display());
-            let run = TrajectoryLoader::load_trajectory(path)?;
-            let metadata = TrajectoryLoader::get_metadata(&run);
-            println!("   Loaded {} frames with {} bodies each", metadata.num_frames, metadata.num_bodies);
-            
-            let frames = (0..metadata.num_frames)
-                .map(|idx| TrajectoryLoader::get_bodies_at_frame(&run, idx))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(Some(frames))
-        }
-        None => Ok(None),
-    }
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    
+    print_loading_message(trace_type, path);
+    let run = TrajectoryLoader::load_trajectory(path)?;
+    let frames = extract_frames_from_trajectory(&run)?;
+    
+    Ok(Some(frames))
+}
+
+fn print_loading_message(trace_type: &str, path: &PathBuf) {
+    println!("👁️  Loading {} trace from: {}", trace_type, path.display());
+}
+
+fn extract_frames_from_trajectory(
+    run: &TrajectoryRun,
+) -> Result<Vec<Vec<Body>>, Box<dyn std::error::Error>> {
+    let metadata = TrajectoryLoader::get_metadata(run);
+    println!("   Loaded {} frames with {} bodies each", metadata.num_frames, metadata.num_bodies);
+    
+    Ok((0..metadata.num_frames)
+        .map(|idx| TrajectoryLoader::get_bodies_at_frame(run, idx))
+        .collect::<Result<Vec<_>, _>>()?)
 }
 
 fn ensure_has_frames(
@@ -357,24 +391,55 @@ fn handle_frame_update(
         return;
     }
     
-    if state.last_update.elapsed() >= state.frame_duration {
-        if let Some(new_frame) = advance_frame(state) {
-            state.current_frame = new_frame;
-        } else {
-            elwt.exit();
-            return;
-        }
-        
-        let bodies = get_current_frame_bodies(state);
-        renderer.update(gpu_context, bodies);
-        
-        if state.recording {
-            capture_frame_for_recording(renderer, gpu_context, captured_frames, state.max_frames);
-        }
-        
-        state.last_update = Instant::now();
-        window.request_redraw();
+    if !is_time_for_next_frame(state) {
+        return;
     }
+    
+    if !advance_simulation_frame(state, elwt) {
+        return;
+    }
+    
+    update_and_render_frame(state, renderer, gpu_context, captured_frames);
+    request_next_frame(state, window);
+}
+
+fn is_time_for_next_frame(state: &ApplicationState) -> bool {
+    state.last_update.elapsed() >= state.frame_duration
+}
+
+fn advance_simulation_frame(
+    state: &mut ApplicationState,
+    elwt: &winit::event_loop::EventLoopWindowTarget<()>,
+) -> bool {
+    match advance_frame(state) {
+        Some(new_frame) => {
+            state.current_frame = new_frame;
+            true
+        }
+        None => {
+            elwt.exit();
+            false
+        }
+    }
+}
+
+fn update_and_render_frame(
+    state: &ApplicationState,
+    renderer: &mut Renderer,
+    gpu_context: &GpuContext,
+    captured_frames: &Arc<Mutex<Vec<Vec<u8>>>>,
+) {
+    let bodies = get_current_frame_bodies(state);
+    renderer.update(gpu_context, bodies);
+    
+    if state.recording {
+        capture_frame_for_recording(renderer, gpu_context, captured_frames, state.max_frames);
+    }
+}
+
+fn request_next_frame(state: &mut ApplicationState, window: &winit::window::Window) {
+    state.last_update = Instant::now();
+    window.request_redraw();
 }
 
 fn should_exit_recording(
@@ -416,19 +481,36 @@ fn capture_frame_for_recording(
     captured_frames: &Arc<Mutex<Vec<Vec<u8>>>>,
     max_frames: usize,
 ) {
-    match renderer.render(gpu_context) {
-        Ok(_) => {
-            let mut frames = captured_frames.lock().unwrap();
-            if frames.len() < max_frames {
-                if let Some(frame_data) = renderer.capture_frame(gpu_context) {
-                    if frames.len() % 30 == 0 {
-                        println!("Captured frame {} of {}", frames.len() + 1, max_frames);
-                    }
-                    frames.push(frame_data);
-                }
-            }
-        }
-        Err(e) => eprintln!("Render error during recording: {:?}", e),
+    if let Err(e) = renderer.render(gpu_context) {
+        eprintln!("Render error during recording: {:?}", e);
+        return;
+    }
+    
+    store_captured_frame(renderer, gpu_context, captured_frames, max_frames);
+}
+
+fn store_captured_frame(
+    renderer: &Renderer,
+    gpu_context: &GpuContext,
+    captured_frames: &Arc<Mutex<Vec<Vec<u8>>>>,
+    max_frames: usize,
+) {
+    let mut frames = captured_frames.lock().unwrap();
+    
+    if frames.len() >= max_frames {
+        return;
+    }
+    
+    if let Some(frame_data) = renderer.capture_frame(gpu_context) {
+        report_capture_progress(&frames, max_frames);
+        frames.push(frame_data);
+    }
+}
+
+fn report_capture_progress(frames: &[Vec<u8>], max_frames: usize) {
+    const REPORT_INTERVAL: usize = 30;
+    if frames.len() % REPORT_INTERVAL == 0 {
+        println!("Captured frame {} of {}", frames.len() + 1, max_frames);
     }
 }
 
