@@ -1,73 +1,43 @@
 # Physics Engine Test Suite
 
-This comprehensive test suite ensures the robustness, correctness, and performance of our differentiable physics engine. The tests are organized hierarchically and cover everything from low-level math utilities to full integration tests.
-
-## Overview
-
-The test suite is structured into four main categories:
-
-- **Unit Tests**: Test individual components in isolation
-- **Integration Tests**: Test the full physics pipeline and emergent behaviors
-- **Benchmarks**: Measure performance to prevent regressions
-- **Debugging Tests**: Specialized diagnostic tools (not part of CI)
-
-## Directory Structure
+## Organization
 
 ```
 tests/
-├── run_ci.py                # Main CI test runner
-├── conftest.py              # Shared pytest fixtures
-├── unit/
-│   └── physics/
-│       ├── test_broadphase.py    # Differentiable broadphase tests
-│       └── test_math_utils.py    # Quaternion and matrix operations
-├── integration/
-│   ├── test_energy_conservation.py  # Physical invariants
-│   ├── test_simulation_stability.py  # Numerical stability
-│   └── test_fuzzing_stability.py     # Property-based fuzzing
-├── benchmarks/
-│   └── test_physics_step_performance.py  # Performance metrics
-└── debugging/               # Diagnostic tools (see debugging/README.md)
-    ├── test_position_corruption.py
-    ├── find_nan_source.py
-    └── ... (specialized debug tests)
+├── unit/                    # Unit tests for individual components
+│   ├── physics/            # Physics-specific unit tests
+│   │   ├── bouncing/       # Bounce behavior tests
+│   │   ├── collision/      # Collision detection/response tests
+│   │   ├── impulse/        # Impulse calculation tests
+│   │   ├── test_broadphase.py
+│   │   ├── test_math_utils.py
+│   │   └── ...             # Other physics component tests
+│   └── custom_ops/         # Custom operations tests
+├── integration/            # Integration and end-to-end tests
+│   ├── test_energy_conservation.py
+│   ├── test_simulation_stability.py
+│   ├── test_fuzzing_stability.py
+│   └── ...
+├── benchmarks/             # Performance benchmarks
+│   └── test_physics_step_performance.py
+├── debugging/              # Debug utilities and temporary test files
+└── run_ci.py              # Main CI test runner
 ```
 
-## Quick Start - CI Test Suite
+## Quick Start
 
-The easiest way to run all tests is using the CI script:
-
+### Run CI Suite
 ```bash
 # From physics_core directory
 python3 tests/run_ci.py
 ```
 
-This runs 7 comprehensive tests:
-1. Import Tests - Verify all modules can be imported
-2. Basic Simulation - Test sphere falling under gravity  
-3. JIT Compilation - Verify JIT compilation works
-4. NumPy-Free Core - Ensure core modules don't import NumPy
-5. Main Script - Test the main.py entry point
-6. Collision Detection - Test collision response
-7. Performance - Basic performance benchmarks
-
-## Running the Tests
-
-### Install Dependencies
-
-```bash
-pip install pytest pytest-benchmark numpy tinygrad hypothesis
-```
-
 ### Run All Tests
-
 ```bash
-# From the physics_core directory
-pytest tests/
+python -m pytest tests/
 ```
 
-### Run Specific Test Categories
-
+### Run Specific Categories
 ```bash
 # Unit tests only
 pytest tests/unit/
@@ -77,170 +47,78 @@ pytest tests/integration/
 
 # Benchmarks only
 pytest tests/benchmarks/ -m benchmark
+
+# Specific component
+pytest tests/unit/physics/collision/
 ```
 
-### Run with Verbose Output
+## Test Categories
 
-```bash
-pytest tests/ -v
-```
+### Unit Tests (`unit/`)
+Test individual functions and classes in isolation:
+- **physics/**: Core physics components
+  - **bouncing/**: Restitution and bounce behavior
+  - **collision/**: Contact detection and response
+  - **impulse/**: Impulse calculations
+  - **test_broadphase.py**: Differentiable broadphase
+  - **test_math_utils.py**: Quaternion and matrix ops
+- **custom_ops/**: Custom C extensions
 
-### Run with Coverage Report
+### Integration Tests (`integration/`)
+Test complete simulation scenarios:
+- **test_energy_conservation.py**: Verify physical invariants
+- **test_simulation_stability.py**: Numerical stability checks
+- **test_fuzzing_stability.py**: Property-based testing with random scenes
 
+### Benchmarks (`benchmarks/`)
+Performance testing and profiling:
+- **test_physics_step_performance.py**: Step performance with various body counts
+
+### Debugging (`debugging/`)
+Temporary test files for investigating issues:
+- Should be cleaned up regularly
+- Not part of CI pipeline
+- Used for reproducing and fixing specific bugs
+
+## Running Tests
+
+### With Coverage
 ```bash
 pytest tests/ --cov=physics --cov-report=html
 ```
 
-## Test Descriptions
-
-### Unit Tests
-
-#### `test_math_utils.py`
-Tests the correctness of quaternion operations and rotation matrices:
-- Quaternion multiplication
-- Quaternion to rotation matrix conversion
-- Vector rotation by quaternion
-- Validation of rotation matrix properties (orthogonality, determinant)
-
-#### `test_broadphase.py`
-Tests the differentiable all-pairs broadphase collision detection:
-- Correct generation of all N*(N-1)/2 unique pairs
-- AABB collision detection for spheres and boxes
-- Handling of rotated shapes
-- Edge cases (empty scene, single body)
-
-### Integration Tests
-
-#### `test_energy_conservation.py`
-Verifies that the simulation conserves energy appropriately:
-- Total kinetic energy doesn't spontaneously increase
-- Energy is properly dissipated (not created) in collisions
-- Tests with various scene configurations
-
-#### `test_simulation_stability.py`
-Ensures the simulation remains stable under various conditions:
-- Box stacks settle without exploding
-- High-velocity collisions remain bounded
-- Random chaotic scenes don't diverge
-- Zero timestep handling
-
-#### `test_fuzzing_stability.py`
-Property-based testing that generates random physics scenes:
-- Uses hypothesis library to generate hundreds of random configurations
-- Verifies stability and physical laws hold across all scenarios
-- Tests dense scenes with many bodies in close proximity
-- Validates different timestep configurations
-- Acts as an automated "chaos monkey" for finding edge cases
-
-### Benchmarks
-
-#### `test_physics_step_performance.py`
-Measures performance of key operations:
-- Full physics step with 10, 50, and 200 bodies
-- Differentiable broadphase scaling
-- Narrowphase performance with many collisions
-
-## Example Test Runs
-
-### Quick Smoke Test
+### With Verbose Output
 ```bash
-pytest tests/unit/physics/test_math_utils.py::TestQuaternionOperations::test_quat_to_rotmat_identity -v
+pytest tests/ -v -s
 ```
 
-### Stability Test with Output
+### Debug on Failure
 ```bash
-pytest tests/integration/test_simulation_stability.py::TestSimulationStability::test_box_stack_is_stable -v -s
-```
-
-### Performance Benchmark
-```bash
-pytest tests/benchmarks/test_physics_step_performance.py::TestPhysicsPerformance::test_physics_step_performance_medium -v -s
-```
-
-### Property-Based Fuzzing
-```bash
-# Run fuzzing tests with more examples
-pytest tests/integration/test_fuzzing_stability.py::TestFuzzingStability::test_fuzz_simulation_stability --hypothesis-show-statistics
-
-# Run with specific seed for reproducibility
-pytest tests/integration/test_fuzzing_stability.py --hypothesis-seed=42
+pytest tests/ --pdb
 ```
 
 ## Writing New Tests
 
 ### Using Fixtures
-
-The `conftest.py` file provides reusable test scenes:
-
+Available in `conftest.py`:
 ```python
-def test_my_physics_feature(two_body_scene):
-    """Test using the two-body collision fixture."""
+def test_my_feature(two_body_scene):
     engine = two_body_scene
-    # Your test code here
+    # Test code here
 ```
 
-Available fixtures:
-- `two_body_scene`: Sphere moving toward a box
-- `multi_body_stack_scene`: Stack of 5 boxes
-- `random_bodies_scene`: 20 random spheres and boxes
-
-### Adding New Test Categories
-
-To add a new test category (e.g., for a renderer):
-
-1. Create a new directory under `tests/unit/` or `tests/integration/`
-2. Add an `__init__.py` file
-3. Follow the naming convention: `test_*.py`
-4. Use descriptive test function names starting with `test_`
+### Naming Conventions
+- Test files: `test_*.py`
+- Test functions: `test_*`
+- Group related tests in subdirectories
 
 ## Continuous Integration
 
-These tests are designed to run in CI/CD pipelines:
-
-```yaml
-# Example GitHub Actions workflow
-- name: Run Physics Engine Tests
-  run: |
-    pip install -r requirements.txt
-    pytest tests/ --cov=physics --cov-report=xml
-```
-
-## Tips for Debugging Failed Tests
-
-1. Run with `-v -s` to see print statements and detailed output
-2. Use `--pdb` to drop into debugger on failure
-3. Run individual tests to isolate issues
-4. Check energy conservation tests for numerical precision issues
-5. For stability tests, visualize the simulation to spot issues
-
-## Performance Testing
-
-To track performance over time:
-
-```bash
-# Run benchmarks and save results
-pytest tests/benchmarks/ -m benchmark --benchmark-json=benchmark_results.json
-
-# Compare with previous results
-pytest tests/benchmarks/ -m benchmark --benchmark-compare=benchmark_results.json
-```
-
-## Property-Based Testing with Hypothesis
-
-The fuzzing tests use hypothesis to automatically generate test cases:
-
-```python
-# Example: Generate random physics bodies
-@given(scene_strategy())
-def test_random_scene(bodies):
-    # Test will run with hundreds of different random scenes
-    engine = TensorPhysicsEngine(bodies)
-    # ... test invariants ...
-```
-
-This approach helps find edge cases that manual testing might miss. The fuzzing tests act as a "chaos monkey" that continuously stress-tests the engine with unexpected configurations.
-
-To see what hypothesis is generating:
-```bash
-pytest tests/integration/test_fuzzing_stability.py --hypothesis-verbosity=debug
-```
+The `run_ci.py` script runs essential tests:
+1. Import verification
+2. Basic simulation
+3. JIT compilation
+4. NumPy-free core
+5. Main script execution
+6. Collision detection
+7. Performance baseline
