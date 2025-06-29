@@ -4,11 +4,11 @@ A pure TinyGrad differentiable rigid-body physics engine with JIT compilation su
 
 ## Demo Videos
 
-![1](artifacts/1.mp4)
+[1.mp4](https://github.com/jaxs-ribs/differentiable-physics-wgpu/blob/main/artifacts/1.mp4)
 
-![2](artifacts/2.mp4)
+[2.mp4](https://github.com/jaxs-ribs/differentiable-physics-wgpu/blob/main/artifacts/2.mp4)
 
-![3](artifacts/3.mp4)
+[3.mp4](https://github.com/jaxs-ribs/differentiable-physics-wgpu/blob/main/artifacts/3.mp4)
 
 ## Installation
 
