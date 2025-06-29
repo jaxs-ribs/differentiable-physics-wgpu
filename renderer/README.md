@@ -4,20 +4,11 @@ A minimal SDF (Signed Distance Field) raymarching renderer for physics simulatio
 
 ## Demo Videos
 
-<video width="640" height="480" controls>
-  <source src="../artifacts/1.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+https://github.com/user-attachments/assets/1.mp4
 
-<video width="640" height="480" controls>
-  <source src="../artifacts/2.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+https://github.com/user-attachments/assets/2.mp4
 
-<video width="640" height="480" controls>
-  <source src="../artifacts/3.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+https://github.com/user-attachments/assets/3.mp4
 
 ## Features
 
