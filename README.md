@@ -4,10 +4,11 @@ A pure TinyGrad differentiable rigid-body physics engine with JIT compilation su
 
 ## Demo Videos
 
-> **Note**: To view the demo videos, please download the following files from the `artifacts` directory:
-> - [1.mp4](artifacts/1.mp4)
-> - [2.mp4](artifacts/2.mp4)  
-> - [3.mp4](artifacts/3.mp4)
+![1](artifacts/1.mp4)
+
+![2](artifacts/2.mp4)
+
+![3](artifacts/3.mp4)
 
 ## Installation
 
