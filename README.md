@@ -2,20 +2,7 @@
 
 A pure TinyGrad differentiable rigid-body physics engine with JIT compilation support.
 
-## Demo Videos
-
-> **To get working video previews**: 
-> 1. Go to any issue in your repo (or create a new one)
-> 2. Drag and drop these MP4 files: `artifacts/1.mp4`, `artifacts/2.mp4`, `artifacts/3.mp4`
-> 3. GitHub will upload them and generate URLs like `https://github.com/user-attachments/assets/...`
-> 4. Replace the URLs below with those generated URLs
-
-<!-- Replace these with GitHub asset URLs after uploading through issues -->
 https://github.com/user-attachments/assets/c83ca74a-d11c-42ad-a4ac-a340326fe149
-
-https://github.com/user-attachments/assets/REPLACE-WITH-2-MP4-ASSET-URL
-
-https://github.com/user-attachments/assets/REPLACE-WITH-3-MP4-ASSET-URL
 
 ## Installation
 
