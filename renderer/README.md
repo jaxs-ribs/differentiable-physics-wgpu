@@ -2,6 +2,23 @@
 
 A minimal SDF (Signed Distance Field) raymarching renderer for physics simulations, built with Rust and WebGPU. This renderer uses brute-force raymarching to precisely visualize spheres, boxes, and capsules with support for headless rendering and video recording.
 
+## Demo Videos
+
+<video width="640" height="480" controls>
+  <source src="../artifacts/1.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
+<video width="640" height="480" controls>
+  <source src="../artifacts/2.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
+<video width="640" height="480" controls>
+  <source src="../artifacts/3.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
 ## Features
 
 - **SDF Raymarching**: Precise visualization using signed distance fields
