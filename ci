@@ -1,3 +1,15 @@
 #!/bin/bash
 # Run CI tests
-python3 tests/run_ci.py "$@"
+
+# Set CI environment variable
+export CI=true
+
+# Detect if we're in conda and use appropriate python command
+if [ -n "$CONDA_DEFAULT_ENV" ]; then
+    PYTHON_CMD="python"
+else
+    PYTHON_CMD="python3"
+fi
+
+# Run the Python CI script
+$PYTHON_CMD tests/run_ci.py "$@"

@@ -53,13 +53,27 @@ def multi_body_stack_scene():
   """Create a physics engine with a stack of boxes to test stability.
   
   Returns:
-    TensorPhysicsEngine with 5 boxes stacked vertically
+    TensorPhysicsEngine with ground + 5 boxes stacked vertically
   """
   bodies_list = []
-  box_size = 1.0
   
+  # Add ground plane
+  ground = create_body_array(
+    position=np.array([0, -2, 0], dtype=np.float32),
+    velocity=np.array([0, 0, 0], dtype=np.float32),
+    orientation=np.array([1, 0, 0, 0], dtype=np.float32),
+    angular_vel=np.array([0, 0, 0], dtype=np.float32),
+    mass=1e8,  # Static
+    inertia=np.eye(3, dtype=np.float32) * 1e8,
+    shape_type=ShapeType.BOX,
+    shape_params=np.array([10.0, 0.5, 10.0], dtype=np.float32)
+  )
+  bodies_list.append(ground)
+  
+  # Stack of boxes
+  box_size = 1.0
   for i in range(5):
-    y_pos = i * (box_size * 2 + 0.1)  # slight gap to avoid initial penetration
+    y_pos = i * (box_size * 2 + 0.1) + 0.5  # Start above ground
     box = create_body_array(
       position=np.array([0, y_pos, 0], dtype=np.float32),
       velocity=np.array([0, 0, 0], dtype=np.float32),
@@ -73,7 +87,8 @@ def multi_body_stack_scene():
     bodies_list.append(box)
   
   bodies = np.stack(bodies_list)
-  engine = TensorPhysicsEngine(bodies, gravity=np.array([0, -9.81, 0], dtype=np.float32))
+  # Use lower restitution to help with stability
+  engine = TensorPhysicsEngine(bodies, gravity=np.array([0, -9.81, 0], dtype=np.float32), restitution=0.1)
   return engine
 
 @pytest.fixture

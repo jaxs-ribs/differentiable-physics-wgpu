@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Calculate effective restitution from observed behavior."""
 
-import numpy as np
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add parent directories to path to find test_setup
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from tests.test_setup import setup_test_paths
+setup_test_paths()
+
+import numpy as np
 
 def calculate_effective_restitution():
     """Calculate what restitution would produce observed behavior."""

@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Test with large timestep like main.py uses."""
 
-import numpy as np
 import sys
 import os
+
+# Add parent directories to path to find test_setup
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from tests.test_setup import setup_test_paths
+setup_test_paths()
+
+import numpy as np
 
 from physics.engine import TensorPhysicsEngine
 from physics.types import create_body_array, ShapeType

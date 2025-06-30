@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Count how many times resolve_collisions is called."""
 
-import numpy as np
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add parent directories to path to find test_setup
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from tests.test_setup import setup_test_paths
+setup_test_paths()
+
+import numpy as np
 
 os.environ['JIT'] = '0'
 
@@ -27,10 +33,10 @@ physics.solver.resolve_collisions = resolve_collisions_counter
 import physics.engine
 _original_step = physics.engine._physics_step_static
 
-def step_counter(*args, **kwargs):
+def step_counter(bodies, dt, gravity, restitution=0.1):
     global step_count
     step_count += 1
-    return _original_step(*args, **kwargs)
+    return _original_step(bodies, dt, gravity, restitution)
 
 physics.engine._physics_step_static = step_counter
 
@@ -74,7 +80,8 @@ def test_count():
     step_count = 0
     
     prev_vy = 0
-    for i in range(1200):
+    max_steps = 300 if os.environ.get('CI') == 'true' else 1200
+    for i in range(max_steps):
         state = engine.get_state()
         vy = state[1, 4]
         

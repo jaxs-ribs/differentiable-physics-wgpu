@@ -11,7 +11,7 @@ from .broadphase_tensor import differentiable_broadphase
 from .narrowphase import narrowphase
 from .solver import resolve_collisions
 
-def _physics_step_static(bodies: Tensor, dt: float, gravity: Tensor) -> Tensor:
+def _physics_step_static(bodies: Tensor, dt: float, gravity: Tensor, restitution: float = 0.1) -> Tensor:
   """Static physics step function for use in N-step simulation.
   
   This function is defined outside the class so it can be called
@@ -21,6 +21,7 @@ def _physics_step_static(bodies: Tensor, dt: float, gravity: Tensor) -> Tensor:
     bodies: State tensor of shape (N, NUM_PROPERTIES)
     dt: Timestep in seconds
     gravity: Gravity acceleration vector
+    restitution: Coefficient of restitution for collisions
     
   Returns:
     Updated state tensor
@@ -44,7 +45,7 @@ def _physics_step_static(bodies: Tensor, dt: float, gravity: Tensor) -> Tensor:
   
   return bodies
 
-def _n_step_simulation(initial_bodies: Tensor, dt: float, gravity: Tensor, num_steps: int) -> Tensor:
+def _n_step_simulation(initial_bodies: Tensor, dt: float, gravity: Tensor, num_steps: int, restitution: float = 0.1) -> Tensor:
   """N-step simulation function that can be JIT-compiled.
   
   This function contains the simulation loop and will be unrolled by TinyJit
@@ -55,6 +56,7 @@ def _n_step_simulation(initial_bodies: Tensor, dt: float, gravity: Tensor, num_s
     dt: Fixed timestep in seconds
     gravity: Gravity acceleration vector
     num_steps: Number of simulation steps to run
+    restitution: Coefficient of restitution for collisions
     
   Returns:
     Final state tensor after N steps
@@ -78,22 +80,24 @@ class TensorPhysicsEngine:
   """
   
   def __init__(self, bodies: np.ndarray, gravity: np.ndarray = np.array([0, -9.81, 0], dtype=np.float32),
-               dt: float = 0.016, use_differentiable: bool = True):
+               dt: float = 0.016, restitution: float = 0.1, use_differentiable: bool = True):
     """Initialize physics engine with JIT compilation.
     
     Args:
       bodies: Initial state array of shape (N, NUM_PROPERTIES)
       gravity: Gravity acceleration vector [x, y, z] in m/s²
       dt: Fixed timestep in seconds (default 60 Hz)
+      restitution: Coefficient of restitution for collisions (0-1)
       use_differentiable: Use differentiable broadphase (always True for JIT)
     """
     self.bodies = Tensor(bodies.astype(np.float32))
     self.gravity = Tensor(gravity.astype(np.float32))
     self.dt = dt
+    self.restitution = restitution
     self.use_differentiable = True  # Always use differentiable for JIT
     
-    # JIT compile the N-step simulation function
-    self.jitted_n_step = TinyJit(_n_step_simulation)
+    # JIT compile the N-step simulation function with bound parameters
+    self.jitted_n_step = TinyJit(lambda bodies, num_steps: _n_step_simulation(bodies, self.dt, self.gravity, num_steps, self.restitution))
     
     # Also keep single-step for debugging
     self.jitted_step = TinyJit(self._physics_step)
@@ -109,7 +113,7 @@ class TensorPhysicsEngine:
     Returns:
       Updated state tensor
     """
-    return _physics_step_static(bodies, self.dt, self.gravity)
+    return _physics_step_static(bodies, self.dt, self.gravity, self.restitution)
   
   def run_simulation(self, num_steps: int) -> None:
     """Run N-step simulation using the JIT-compiled function.
@@ -120,9 +124,9 @@ class TensorPhysicsEngine:
     Args:
       num_steps: Number of simulation steps to run
     """
-    self.bodies = self.jitted_n_step(self.bodies, self.dt, self.gravity, num_steps)
+    self.bodies = self.jitted_n_step(self.bodies, num_steps)
   
-  def step(self, dt: float | None = None) -> None:
+  def step(self, dt: float | None = None) -> Tensor:
     """Execute one physics simulation step.
     
     Args:
@@ -135,6 +139,7 @@ class TensorPhysicsEngine:
     
     # Run the JIT-compiled physics step
     self.bodies = self.jitted_step(self.bodies)
+    return self.bodies  # Return for compatibility with tests
   
   def get_state(self) -> np.ndarray:
     """Get current state of all bodies as numpy array."""

@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Test if angular terms are causing the issue."""
 
-import numpy as np
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add parent directories to path to find test_setup
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from tests.test_setup import setup_test_paths
+setup_test_paths()
+
+import numpy as np
 
 os.environ['JIT'] = '0'
 

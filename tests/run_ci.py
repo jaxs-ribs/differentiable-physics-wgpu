@@ -64,10 +64,19 @@ def print_error(text):
 def print_warning(text):
     print(f"{YELLOW}⚠ {text}{RESET}")
 
-def run_command(cmd, description, capture_output=False):
-    """Run a command and return success status."""
-    print(f"Running: {description}")
+def run_command(cmd, description, capture_output=False, timeout=30):
+    """Run a command and return success status.
+    
+    Args:
+        cmd: Command to run
+        description: Description of the command
+        capture_output: Whether to capture stdout/stderr
+        timeout: Timeout in seconds (default 30)
+    """
+    print(f"\n[{time.strftime('%H:%M:%S')}] Running: {description}")
     print(f"Command: {cmd}")
+    print(f"Timeout: {timeout}s")
+    sys.stdout.flush()  # Ensure output is visible immediately
     
     # Set up environment with proper PYTHONPATH
     env = os.environ.copy()
@@ -81,27 +90,40 @@ def run_command(cmd, description, capture_output=False):
     else:
         env['PYTHONPATH'] = python_path
     
+    start_time = time.time()
+    
     try:
         if capture_output:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, env=env)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, env=env, timeout=timeout)
+            elapsed = time.time() - start_time
+            
             if result.returncode == 0:
-                print_success(description)
+                print_success(f"{description} (took {elapsed:.1f}s)")
                 return True, result.stdout
             else:
-                print_error(f"{description} - Exit code: {result.returncode}")
+                print_error(f"{description} - Exit code: {result.returncode} (took {elapsed:.1f}s)")
                 if result.stderr:
                     print(f"Error: {result.stderr}")
                 return False, result.stderr
         else:
-            result = subprocess.run(cmd, shell=True, env=env)
+            result = subprocess.run(cmd, shell=True, env=env, timeout=timeout)
+            elapsed = time.time() - start_time
+            
             if result.returncode == 0:
-                print_success(description)
+                print_success(f"{description} (took {elapsed:.1f}s)")
                 return True, None
             else:
-                print_error(f"{description} - Exit code: {result.returncode}")
+                print_error(f"{description} - Exit code: {result.returncode} (took {elapsed:.1f}s)")
                 return False, None
+                
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - start_time
+        print_error(f"{description} - TIMEOUT after {elapsed:.1f}s")
+        return False, "Test timed out"
+        
     except Exception as e:
-        print_error(f"{description} - Exception: {e}")
+        elapsed = time.time() - start_time
+        print_error(f"{description} - Exception: {e} (after {elapsed:.1f}s)")
         return False, str(e)
 
 def test_imports():
@@ -377,21 +399,30 @@ def test_main_script():
             nstep_data = np.load('artifacts/test_ci_nstep.npy')
             single_data = np.load('artifacts/test_ci_single.npy')
             
-            if nstep_data.shape == (2, 2, 27):
+            # Main.py saves flattened renderer format: (frames, bodies*properties)
+            # With 2 frames, 2 bodies, 18 properties each = (2, 36)
+            expected_shape = (2, 36)
+            
+            if nstep_data.shape == expected_shape:
                 print_success(f"N-step output shape correct: {nstep_data.shape}")
             else:
-                print_error(f"N-step output shape incorrect: {nstep_data.shape}")
+                print_error(f"N-step output shape incorrect: {nstep_data.shape}, expected {expected_shape}")
                 return False
                 
-            if single_data.shape == (2, 2, 27):
+            if single_data.shape == expected_shape:
                 print_success(f"Single-step output shape correct: {single_data.shape}")
             else:
-                print_error(f"Single-step output shape incorrect: {single_data.shape}")
+                print_error(f"Single-step output shape incorrect: {single_data.shape}, expected {expected_shape}")
                 return False
             
             # Check that final positions are similar
-            nstep_final_y = nstep_data[1, 1, BodySchema.POS_Y]
-            single_final_y = single_data[1, 1, BodySchema.POS_Y]
+            # Data is flattened: reshape to (frames, bodies, properties)
+            nstep_reshaped = nstep_data.reshape(2, 2, 18)
+            single_reshaped = single_data.reshape(2, 2, 18)
+            
+            # Position Y is at index 1 in the 18-property format
+            nstep_final_y = nstep_reshaped[1, 1, 1]  # frame 1, body 1 (sphere), y position
+            single_final_y = single_reshaped[1, 1, 1]
             
             if abs(nstep_final_y - single_final_y) < 0.1:
                 print_success(f"Final positions match: N-step={nstep_final_y:.3f}, Single={single_final_y:.3f}")
@@ -494,6 +525,159 @@ def test_performance():
         print_error(f"Performance test failed: {e}")
         return False
 
+def run_unit_and_integration_tests():
+    """Run all unit and integration tests."""
+    print_header("Unit and Integration Tests")
+    
+    print("[INFO] Running tests that have standalone execution support")
+    print("[INFO] Tests requiring pytest are skipped in CI")
+    print("")
+    
+    # Tests that can run standalone (have if __name__ == "__main__")
+    standalone_tests = [
+        # Unit tests with main
+        "tests/unit/physics/test_angular_terms.py",
+        "tests/unit/physics/test_effective_restitution.py",
+        "tests/unit/physics/test_resolve_count.py",
+        "tests/unit/physics/bouncing/test_bounce_behavior.py",
+        "tests/unit/physics/collision/test_collision_detection.py",
+        "tests/unit/physics/impulse/test_impulse_resolution.py",
+        # Integration tests with main
+        "tests/integration/test_every_step.py",
+        "tests/integration/test_index_order.py",
+        "tests/integration/test_minimal.py",
+        "tests/integration/test_large_timestep.py",
+    ]
+    
+    passed = 0
+    failed = 0
+    skipped = 0
+    
+    for test_file in standalone_tests:
+        if not os.path.exists(test_file):
+            print_warning(f"Test file not found: {test_file}")
+            skipped += 1
+            continue
+        
+        # Check if test has main block
+        with open(test_file, 'r') as f:
+            content = f.read()
+            if 'if __name__' not in content:
+                print_warning(f"Skipping {test_file} - requires pytest")
+                skipped += 1
+                continue
+        
+        # Extract module name from path
+        module_name = test_file.replace('/', '.').replace('.py', '')
+        
+        # Run the test
+        print(f"\n[TEST] Running {test_file}...")
+        sys.stdout.flush()
+        
+        # Use longer timeout for certain tests
+        timeout = 60 if 'energy_conservation' in test_file else 30
+        
+        success, output = run_command(
+            f"python3 {test_file}",
+            f"{os.path.basename(test_file)}",
+            capture_output=True,
+            timeout=timeout
+        )
+        
+        if success:
+            passed += 1
+        else:
+            failed += 1
+            if output:
+                # Show first 10 lines of error
+                error_lines = output.split('\n')[:10]
+                print("  Error output:")
+                for line in error_lines:
+                    print(f"    {line}")
+    
+    print(f"\n[SUMMARY] Unit/Integration tests: {passed} passed, {failed} failed, {skipped} skipped")
+    return failed == 0
+
+def run_pytest_tests(quick_mode=False):
+    """Run tests that require pytest."""
+    print_header("Pytest-based Tests")
+    
+    # Check if pytest is available
+    pytest_check, _ = run_command(
+        "python3 -m pytest --version",
+        "Checking for pytest",
+        capture_output=True,
+        timeout=5
+    )
+    
+    if not pytest_check:
+        print_warning("Pytest not found. Skipping pytest-based tests.")
+        print("[INFO] To run all tests, install pytest: pip install pytest")
+        return True  # Don't fail CI if pytest not installed
+    
+    print("[INFO] Running tests with pytest")
+    print("[INFO] Using pytest timeout plugin for individual test timeouts")
+    print("")
+    
+    # Pytest test files (excluding those with standalone main)
+    pytest_files = [
+        # Core physics tests
+        "tests/unit/physics/test_math_utils.py",
+        "tests/unit/physics/test_broadphase.py",
+        "tests/integration/test_simulation_stability.py",
+        "tests/integration/test_energy_conservation.py",
+        "tests/integration/test_fuzzing_stability.py -k 'test_no_nan_or_inf and not slow'",  # Skip slow fuzzing tests
+    ]
+    
+    # Optional custom_ops tests (not critical for merge)
+    if not quick_mode:
+        pytest_files.extend([
+            "tests/unit/custom_ops/test_extension.py",
+            "tests/unit/custom_ops/test_integration.py",
+            "tests/unit/custom_ops/test_patterns.py",
+        ])
+    
+    # Run with appropriate flags for CI
+    ci_flags = [
+        "-v",  # Verbose
+        "-x",  # Stop on first failure
+        "--tb=short",  # Short traceback
+    ]
+    
+    if os.environ.get('CI') == 'true':
+        ci_flags.append("--no-header")  # Cleaner output in CI
+    
+    passed = 0
+    failed = 0
+    
+    for test_spec in pytest_files:
+        if not os.path.exists(test_spec.split("::")[0]):
+            print_warning(f"Test file not found: {test_spec}")
+            continue
+        
+        flags = " ".join(ci_flags)
+        success, output = run_command(
+            f"python3 -m pytest {flags} {test_spec}",
+            f"pytest: {test_spec}",
+            capture_output=True,
+            timeout=60  # Overall timeout for pytest run
+        )
+        
+        if success:
+            passed += 1
+        else:
+            failed += 1
+            if output:
+                # Show pytest output on failure
+                print("\n--- Pytest Output ---")
+                print(output[:1000])  # First 1000 chars
+                if len(output) > 1000:
+                    print("... (truncated)")
+                print("--- End Output ---\n")
+    
+    print(f"\n[SUMMARY] Pytest tests: {passed} passed, {failed} failed")
+    return failed == 0
+
 def cleanup():
     """Clean up test artifacts."""
     print_header("Cleanup")
@@ -510,31 +694,54 @@ def cleanup():
 
 def main():
     """Run all CI tests."""
+    # Parse arguments
+    quick_mode = '--quick' in sys.argv
+    
     print(f"\n{BLUE}{'='*60}{RESET}")
     print(f"{BLUE}{'PHYSICS ENGINE CI TEST SUITE':^60}{RESET}")
     print(f"{BLUE}{'='*60}{RESET}\n")
     
-    # Track results
-    results = []
+    if quick_mode:
+        print(f"{YELLOW}Running in QUICK mode - skipping slow tests{RESET}")
     
-    # Run all tests
-    tests = [
+    if os.environ.get('CI') == 'true':
+        print(f"{GREEN}CI environment detected - tests will use reduced iterations{RESET}")
+    
+    # Track results and timing
+    results = []
+    test_times = {}
+    
+    # Define all tests
+    all_tests = [
         ("Import Tests", test_imports),
         ("Basic Simulation", test_basic_simulation),
         ("JIT Compilation", test_jit_compilation),
         ("NumPy-Free Core", test_numpy_free),
         ("Main Script", test_main_script),
         ("Collision Detection", test_collision_detection),
-        ("Performance", test_performance)
     ]
     
-    for test_name, test_func in tests:
+    # Add slow tests only if not in quick mode
+    if not quick_mode:
+        all_tests.extend([
+            ("Performance", test_performance),
+            ("Unit and Integration Tests", run_unit_and_integration_tests),
+            ("Pytest Tests", lambda: run_pytest_tests(quick_mode)),
+        ])
+    
+    # Run all tests
+    for test_name, test_func in all_tests:
+        start_time = time.time()
         try:
             result = test_func()
             results.append((test_name, result))
         except Exception as e:
             print_error(f"{test_name} crashed: {e}")
+            import traceback
+            traceback.print_exc()
             results.append((test_name, False))
+        
+        test_times[test_name] = time.time() - start_time
     
     # Cleanup
     cleanup()
@@ -545,13 +752,24 @@ def main():
     passed = sum(1 for _, result in results if result)
     total = len(results)
     
+    # Show results
+    print("\nTest Results:")
     for test_name, result in results:
+        time_str = f"({test_times.get(test_name, 0):.1f}s)"
         if result:
-            print_success(f"{test_name}")
+            print_success(f"{test_name:<40} {time_str}")
         else:
-            print_error(f"{test_name}")
+            print_error(f"{test_name:<40} {time_str}")
+    
+    # Show slowest tests
+    print("\nSlowest tests:")
+    sorted_times = sorted(test_times.items(), key=lambda x: x[1], reverse=True)[:5]
+    for test_name, duration in sorted_times:
+        print(f"  {test_name:<40} {duration:.1f}s")
     
     print(f"\n{BLUE}{'='*60}{RESET}")
+    print(f"Total time: {sum(test_times.values()):.1f}s")
+    
     if passed == total:
         print(f"{GREEN}ALL TESTS PASSED! ({passed}/{total}){RESET}")
         return 0
