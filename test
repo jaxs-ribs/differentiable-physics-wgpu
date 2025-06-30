@@ -1,3 +1,0 @@
-#!/bin/bash
-# Run the interactive test hell session
-python3 scripts/run_test_hell.py "$@"
