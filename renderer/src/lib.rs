@@ -30,10 +30,11 @@ struct ViewProjectionUniform {
     matrix: [[f32; 4]; 4],
 }
 
-impl ViewProjectionUniform {
-    fn new(matrix: [[f32; 4]; 4]) -> Self {
-        Self { matrix }
-    }
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct TraceUniform {
+    color: [f32; 3],
+    alpha: f32,
 }
 
 /// Main rendering context for physics visualization.
@@ -44,15 +45,20 @@ pub struct Renderer {
     render_pipeline: wgpu::RenderPipeline,
     
     // Scene data
-    bodies_buffer: wgpu::Buffer,
     camera: Camera,
+    trace_renderers: Vec<TraceRenderer>,
     
     // GPU uniforms
     view_projection_buffer: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
     
     // Frame capture
     capture_resources: Option<CaptureResources>,
+}
+
+struct TraceRenderer {
+    bodies_buffer: wgpu::Buffer,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
 }
 
 struct CaptureResources {
@@ -62,24 +68,27 @@ struct CaptureResources {
     bytes_per_row: u32,
 }
 
-struct GpuResources {
-    pipeline: wgpu::RenderPipeline,
-    bodies_buffer: wgpu::Buffer,
-    view_projection_buffer: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-}
-
 impl Renderer {
     pub async fn new(
         window: Option<&winit::window::Window>,
         gpu: &GpuContext,
         enable_capture: bool,
+        num_traces: usize,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let surface = create_surface(window, gpu)?;
         let (config, surface_format) = configure_surface(&surface, window, gpu)?;
         
         let camera = Camera::new(config.width as f32 / config.height as f32);
-        let resources = create_gpu_resources(gpu, &camera, surface_format)?;
+        let view_projection_buffer = create_uniform_buffer(gpu, &camera);
+
+        let shader = load_sdf_shader(gpu);
+        let bind_group_layout = create_bind_group_layout(gpu);
+        let render_pipeline = create_render_pipeline(gpu, &shader, &bind_group_layout, surface_format);
+
+        let trace_renderers = (0..num_traces).map(|_|
+            TraceRenderer::new(gpu, &bind_group_layout, &view_projection_buffer)
+        ).collect();
+
         let capture_resources = if enable_capture || surface.is_none() {
             Some(create_capture_resources(gpu, &config, surface_format)?)
         } else {
@@ -89,20 +98,25 @@ impl Renderer {
         Ok(Self {
             surface,
             config,
-            render_pipeline: resources.pipeline,
-            bodies_buffer: resources.bodies_buffer,
-            view_projection_buffer: resources.view_projection_buffer,
-            bind_group: resources.bind_group,
+            render_pipeline,
             camera,
+            trace_renderers,
+            view_projection_buffer,
             capture_resources,
         })
     }
     
     /// Updates scene bodies on the GPU.
-    pub fn update(&mut self, gpu: &GpuContext, bodies: &[Body]) {
-        if !bodies.is_empty() {
-            let bytes = bytemuck::cast_slice(bodies);
-            gpu.queue.write_buffer(&self.bodies_buffer, 0, bytes);
+    pub fn update(&mut self, gpu: &GpuContext, bodies_per_trace: &[&[Body]], colors: &[[f32; 3]], alphas: &[f32]) {
+        for i in 0..self.trace_renderers.len() {
+            if i < bodies_per_trace.len() && !bodies_per_trace[i].is_empty() {
+                let bytes = bytemuck::cast_slice(bodies_per_trace[i]);
+                gpu.queue.write_buffer(&self.trace_renderers[i].bodies_buffer, 0, bytes);
+            }
+            if i < colors.len() && i < alphas.len() {
+                let uniform_data = TraceUniform { color: colors[i], alpha: alphas[i] };
+                gpu.queue.write_buffer(&self.trace_renderers[i].uniform_buffer, 0, bytemuck::cast_slice(&[uniform_data]));
+            }
         }
     }
     
@@ -274,14 +288,29 @@ impl Renderer {
         });
         
         pass.set_pipeline(&self.render_pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
-        pass.draw(0..3, 0..1);
+        for trace_renderer in &self.trace_renderers {
+            pass.set_bind_group(0, &trace_renderer.bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
     }
     
     fn update_uniform_buffer(&self, gpu: &GpuContext) {
         let matrix = self.camera.view_projection_matrix_transposed();
         let uniform_data = ViewProjectionUniform::new(matrix);
         gpu.queue.write_buffer(&self.view_projection_buffer, 0, bytemuck::cast_slice(&[uniform_data]));
+    }
+}
+
+impl TraceRenderer {
+    fn new(gpu: &GpuContext, layout: &wgpu::BindGroupLayout, view_projection_buffer: &wgpu::Buffer) -> Self {
+        let bodies_buffer = create_bodies_buffer(gpu);
+        let uniform_buffer = create_trace_uniform_buffer(gpu);
+        let bind_group = create_bind_group(gpu, layout, view_projection_buffer, &bodies_buffer, &uniform_buffer);
+        Self {
+            bodies_buffer,
+            uniform_buffer,
+            bind_group,
+        }
     }
 }
 
@@ -348,76 +377,11 @@ fn configure_surface(
     }
 }
 
-fn create_gpu_resources(
-    gpu: &GpuContext,
-    camera: &Camera,
-    surface_format: wgpu::TextureFormat,
-) -> Result<GpuResources, Box<dyn std::error::Error>> {
-    let buffers = create_gpu_buffers(gpu, camera);
-    let shader = load_sdf_shader(gpu);
-    let bind_group = create_resource_bindings(gpu, &buffers);
-    let pipeline = create_render_pipeline(gpu, &shader, &bind_group.layout, surface_format);
-    
-    Ok(GpuResources {
-        pipeline,
-        bodies_buffer: buffers.bodies,
-        view_projection_buffer: buffers.view_projection,
-        bind_group: bind_group.group,
-    })
-}
-
-struct GpuBuffers {
-    view_projection: wgpu::Buffer,
-    bodies: wgpu::Buffer,
-}
-
-struct ResourceBindings {
-    layout: wgpu::BindGroupLayout,
-    group: wgpu::BindGroup,
-}
-
-fn create_gpu_buffers(gpu: &GpuContext, camera: &Camera) -> GpuBuffers {
-    GpuBuffers {
-        view_projection: create_uniform_buffer(gpu, camera),
-        bodies: create_bodies_buffer(gpu),
-    }
-}
-
-fn load_sdf_shader(gpu: &GpuContext) -> wgpu::ShaderModule {
-    gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("SDF Shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sdf.wgsl").into()),
-    })
-}
-
-fn create_resource_bindings(gpu: &GpuContext, buffers: &GpuBuffers) -> ResourceBindings {
-    let layout = create_bind_group_layout(gpu);
-    let group = create_bind_group(
-        gpu,
-        &layout,
-        &buffers.view_projection,
-        &buffers.bodies,
-    );
-    
-    ResourceBindings { layout, group }
-}
-
-fn create_uniform_buffer(gpu: &GpuContext, camera: &Camera) -> wgpu::Buffer {
-    let uniform_data = ViewProjectionUniform::new(camera.view_projection_matrix_transposed());
-    
+fn create_trace_uniform_buffer(gpu: &GpuContext) -> wgpu::Buffer {
     gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("View Projection Buffer"),
-        contents: bytemuck::cast_slice(&[uniform_data]),
+        label: Some("Trace Uniform Buffer"),
+        contents: bytemuck::cast_slice(&[TraceUniform { color: [1.0, 1.0, 1.0], alpha: 1.0 }]),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    })
-}
-
-fn create_bodies_buffer(gpu: &GpuContext) -> wgpu::Buffer {
-    gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Bodies Buffer"),
-        size: (std::mem::size_of::<Body>() * MAX_BODIES) as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
     })
 }
 
@@ -445,6 +409,16 @@ fn create_bind_group_layout(gpu: &GpuContext) -> wgpu::BindGroupLayout {
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     })
 }
@@ -454,6 +428,7 @@ fn create_bind_group(
     layout: &wgpu::BindGroupLayout,
     view_projection_buffer: &wgpu::Buffer,
     bodies_buffer: &wgpu::Buffer,
+    trace_uniform_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("SDF Bind Group"),
@@ -466,6 +441,10 @@ fn create_bind_group(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: bodies_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: trace_uniform_buffer.as_entire_binding(),
             },
         ],
     })
@@ -496,7 +475,7 @@ fn create_render_pipeline(
             entry_point: "fs_main",
             targets: &[Some(wgpu::ColorTargetState {
                 format: surface_format,
-                blend: None,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),

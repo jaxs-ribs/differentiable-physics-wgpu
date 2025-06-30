@@ -1,3 +1,0 @@
-#!/bin/bash
-# Run physics simulation
-python3 scripts/run_physics.py "$@"

@@ -21,141 +21,54 @@ pip install numpy  # TinyGrad is included as a submodule
 ## Quick Start
 
 ```bash
-# Run the physics simulation (creates artifacts/oracle_dump.npy)
-./run --steps 200
+# Run the default naive simulation and render the result
+python3 run.py --naive
 
-# Run all tests (7 comprehensive tests)
-./ci
-
-# Run interactive test hell session
-./test
-```
-
-## Visualization Pipeline
-
-### 1. Generate Physics Simulation Data
-
-```bash
-# Basic simulation (2 frames: initial and final)
-python3 scripts/run_physics.py --steps 200
-
-# Save all intermediate frames for smooth playback
-python3 scripts/run_physics.py --steps 100 --mode single --save-intermediate
-
-# Custom output location
-python3 scripts/run_physics.py --steps 500 --output artifacts/my_simulation.npy
-```
-
-### 2. Visualize with SDF Renderer
-
-```bash
-# Interactive visualization (use mouse to rotate, scroll to zoom)
-./renderer/target/release/renderer --oracle artifacts/oracle_dump.npy
-
-# Headless rendering to PNG
-./renderer/target/release/renderer --save-frame artifacts/simulation_frame.png
-
-# Record video (requires FFmpeg)
-# Generate physics simulation with many frames
-python3 physics/main.py --steps 420 --save-intermediate
-
-# Record at 60fps for smooth playback
-./renderer/target/release/renderer --oracle artifacts/test_420.npy --record artifacts/simulation.mp4 --fps 60
-```
-
-### 3. Compare Multiple Simulations
-
-```bash
-# Generate CPU and GPU simulations
-python3 scripts/run_physics.py --output artifacts/cpu_run.npy
-# (In future: generate GPU version)
-
-# Visualize both simultaneously (ghost overlay)
-./renderer/target/release/renderer --oracle artifacts/cpu_run.npy --gpu artifacts/gpu_run.npy
-```
-
-## Key Features
-
-- **Pure Tensor Operations** - No NumPy in core physics modules
-- **JIT Compilable** - Entire N-step simulations run as single GPU kernels
-- **Differentiable** - Gradients flow through collision detection and resolution
-- **Multi-Backend** - Runs on any TinyGrad backend (WebGPU, Metal, CUDA, etc.)
-
-## Project Structure
-
-```
-physics_core/
-├── physics/                  # Core physics modules
-│   ├── engine.py            # Main physics engine with JIT support
-│   ├── broadphase_tensor.py # Differentiable AABB collision detection
-│   ├── narrowphase.py       # Sphere-sphere and sphere-box collisions
-│   ├── solver.py            # Impulse-based collision resolution
-│   ├── integration.py       # Semi-implicit Euler integration
-│   ├── math_utils.py        # Quaternion and matrix operations
-│   ├── types.py             # Body schema and shape types
-│   └── main.py              # Entry point for simulations
-├── renderer/                # Comparative replay renderer (Rust)
-│   ├── README.md           # Renderer documentation
-│   ├── Cargo.toml          # Rust project configuration
-│   └── src/                # Renderer source code
-│       ├── body.rs         # 108-byte body struct
-│       ├── loader.rs       # .npy trajectory loader
-│       └── main.rs         # Renderer entry point
-├── custom_ops/              # Custom C operations for TinyGrad
-│   ├── README.md           # Custom ops documentation
-│   ├── src/                # C source code
-│   │   ├── physics_lib.c   # Physics operations in C
-│   │   └── Makefile        # Build configuration
-│   ├── python/             # Python integration
-│   │   ├── patterns.py     # Pattern matching for physics ops
-│   │   ├── extension.py    # Device extension mechanism
-│   │   └── tensor_ops.py   # High-level tensor API
-│   ├── examples/           # Usage examples
-│   │   ├── basic_demo.py   # Basic demonstration
-│   │   └── benchmark.py    # Performance benchmarks
-│   └── build/              # Compiled libraries
-├── tests/                   # Comprehensive test suite
-│   ├── run_ci.py           # Main CI runner (7 tests)
-│   ├── unit/               # Component tests
-│   │   ├── physics/        # Physics module tests
-│   │   └── custom_ops/     # Custom op tests
-│   ├── integration/        # System tests
-│   ├── benchmarks/         # Performance tests
-│   └── debugging/          # Diagnostic tools
-├── docs/                   # Documentation
-│   ├── AGENTS.md          # Project vision and phases
-│   ├── BUG_FIXES.md       # Documented issues and solutions
-│   ├── TEST_HELL.md       # Interactive test runner guide
-│   └── TEST_SUMMARY.md    # Test results documentation
-├── scripts/                # Utility scripts
-│   ├── run_physics.py     # Physics simulation runner
-│   └── run_test_hell.py   # Interactive test session
-├── artifacts/              # Simulation outputs (.npy files)
-├── external/               # External dependencies
-│   ├── tinygrad/          # TinyGrad submodule
-│   └── tinygrad-notes/    # Reference documentation
-└── README.md              # This file
+# Run all tests
+python3 ci.py
 ```
 
 ## Usage
 
 ### Running Simulations
 
+The `run.py` script is the main entry point for all simulations.
+
 ```bash
-# Basic simulation with default parameters
-python3 -m physics.main
+# Run the pure Python "Oracle" simulation
+python3 run.py --naive
 
-# Custom simulation parameters
-python3 -m physics.main --steps 500 --dt 0.01 --output artifacts/my_simulation.npy
+# Run the C-accelerated simulation
+python3 run.py --c
 
-# N-step JIT mode (default - faster for long simulations)
-python3 -m physics.main --mode nstep --steps 1000
+# Run both and compare them in the renderer
+python3 run.py --naive --c
 
-# Single-step mode (for debugging)
-python3 -m physics.main --mode single --steps 100
+# Run with a different number of steps
+python3 run.py --naive --steps 500
 
-# Save all intermediate frames (single-step mode only)
-python3 -m physics.main --mode single --steps 100 --save-intermediate
+# Save all simulation frames (not just first and last)
+python3 run.py --naive --save-all-frames
+
+# Run simulation without automatically starting the renderer
+python3 run.py --naive --no-render
+
+# Re-render the most recent simulation(s)
+python3 run.py
+```
+
+### Visualizing Results
+
+The renderer is typically launched automatically by `run.py`. You can also run it manually to view specific files.
+
+```bash
+# Build the renderer if you haven't already
+cd renderer
+cargo build --release
+cd ..
+
+# Manually render one or more simulation files
+./renderer/target/release/renderer artifacts/naive_sim_*.npy --color 0.2 0.5 1.0 --alpha 0.7
 ```
 
 ### Using as a Library
@@ -203,20 +116,14 @@ print(f"Sphere final position: {final_state[1, 0:3]}")
 ### Testing
 
 ```bash
-# Quick CI test suite (recommended) - 7 comprehensive tests
-python3 tests/run_ci.py
+# Run the standard test suite (unit + integration)
+python3 ci.py
 
-# Run all tests without pytest
-python3 tests/final_test_summary.py
+# Run only unit tests
+python3 ci.py --unit
 
-# Custom operations tests
-python3 tests/unit/custom_ops/test_c_library.py
-python3 tests/unit/custom_ops/test_integration.py
-
-# Debugging tests
-python3 tests/debugging/test_position_corruption.py
-python3 tests/debugging/test_nan_propagation.py
-python3 tests/debugging/test_jit_early_return.py
+# Run all tests, including benchmarks
+python3 ci.py --all
 ```
 
 #### Test Status (All Passing ✓)

@@ -4,6 +4,11 @@ struct ViewProjection {
     matrix: mat4x4<f32>,
 }
 
+struct TraceUniform {
+    color: vec3<f32>,
+    alpha: f32,
+}
+
 struct Body {
     position: vec4<f32>,      // xyz position, w unused
     velocity: vec4<f32>,      // xyz velocity, w unused
@@ -16,6 +21,7 @@ struct Body {
 
 @group(0) @binding(0) var<uniform> view_projection: ViewProjection;
 @group(0) @binding(1) var<storage, read> bodies: array<Body>;
+@group(0) @binding(2) var<uniform> trace_uniform: TraceUniform;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
@@ -211,8 +217,10 @@ fn raymarch(origin: vec3<f32>, direction: vec3<f32>) -> HitInfo {
 fn shade_pixel(hit_info: HitInfo) -> vec4<f32> {
     if (hit_info.hit) {
         let normal = calculate_normal(hit_info.position);
-        let color = abs(normal);
-        return vec4<f32>(color, 1.0);
+        let light_dir = normalize(vec3<f32>(1.0, 1.0, 1.0));
+        let diffuse = max(dot(normal, light_dir), 0.0);
+        let color = trace_uniform.color * diffuse;
+        return vec4<f32>(color, trace_uniform.alpha);
     } else {
         return vec4<f32>(BACKGROUND_COLOR, 1.0);
     }
