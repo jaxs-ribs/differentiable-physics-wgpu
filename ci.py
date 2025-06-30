@@ -31,6 +31,16 @@ import subprocess
 import time
 from pathlib import Path
 
+# Add paths for physics_core and tinygrad
+physics_core_path = os.path.dirname(os.path.abspath(__file__))
+tinygrad_path = os.path.join(physics_core_path, "external", "tinygrad")
+
+# Add to Python path
+if physics_core_path not in sys.path:
+    sys.path.insert(0, physics_core_path)
+if os.path.exists(tinygrad_path) and tinygrad_path not in sys.path:
+    sys.path.insert(0, tinygrad_path)
+
 # Colors for output
 GREEN = '\033[92m'
 RED = '\033[91m'
@@ -54,11 +64,26 @@ def print_error(text):
 
 def run_pytest(test_path, args=""):
     """Run pytest on a directory or file."""
-    cmd = f"python3 -m pytest {args} {test_path}"
+    # Use 'python' in conda, 'python3' otherwise
+    python_cmd = "python" if os.environ.get("CONDA_DEFAULT_ENV") else "python3"
+    cmd = f"{python_cmd} -m pytest {args} {test_path}"
     print(f"Running: {cmd}")
     
+    # Set up environment with proper paths
+    env = os.environ.copy()
+    physics_core_path = os.path.dirname(os.path.abspath(__file__))
+    tinygrad_path = os.path.join(physics_core_path, "external", "tinygrad")
+    
+    # Add to PYTHONPATH
+    python_path = env.get('PYTHONPATH', '')
+    paths_to_add = [physics_core_path, tinygrad_path]
+    for path in paths_to_add:
+        if path not in python_path:
+            python_path = f"{path}:{python_path}" if python_path else path
+    env['PYTHONPATH'] = python_path
+    
     start_time = time.time()
-    result = subprocess.run(cmd, shell=True)
+    result = subprocess.run(cmd, shell=True, env=env)
     elapsed = time.time() - start_time
     
     return result.returncode == 0, elapsed
@@ -123,6 +148,12 @@ def main():
     
     if args.quick:
         print(f"{YELLOW}Running in QUICK mode - minimal tests only{RESET}")
+    
+    # Check if we're in the right directory
+    if not os.path.exists("physics") or not os.path.exists("tests"):
+        print(f"{RED}Error: Must run from physics_core directory{RESET}")
+        print(f"Current directory: {os.getcwd()}")
+        return 1
     
     if os.environ.get('CI') == 'true':
         print(f"{GREEN}CI environment detected{RESET}")
