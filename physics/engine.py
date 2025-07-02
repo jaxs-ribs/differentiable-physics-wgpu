@@ -5,7 +5,7 @@ expressed as pure tensor computations without Python loops or branches.
 """
 import numpy as np
 from tinygrad import Tensor, TinyJit
-from .types import BodySchema
+from .types import BodySchema, ExecutionMode
 from .integration import integrate
 from .broadphase_tensor import differentiable_broadphase
 from .narrowphase import narrowphase
@@ -80,7 +80,8 @@ class TensorPhysicsEngine:
   """
   
   def __init__(self, bodies: np.ndarray, gravity: np.ndarray = np.array([0, -9.81, 0], dtype=np.float32),
-               dt: float = 0.016, restitution: float = 0.1, use_differentiable: bool = True):
+               dt: float = 0.016, restitution: float = 0.1, use_differentiable: bool = True,
+               execution_mode: ExecutionMode = ExecutionMode.PURE):
     """Initialize physics engine with JIT compilation.
     
     Args:
@@ -89,18 +90,66 @@ class TensorPhysicsEngine:
       dt: Fixed timestep in seconds (default 60 Hz)
       restitution: Coefficient of restitution for collisions (0-1)
       use_differentiable: Use differentiable broadphase (always True for JIT)
+      execution_mode: Backend execution mode (PURE, C, or WGPU)
     """
     self.bodies = Tensor(bodies.astype(np.float32))
     self.gravity = Tensor(gravity.astype(np.float32))
     self.dt = dt
     self.restitution = restitution
     self.use_differentiable = True  # Always use differentiable for JIT
+    self.execution_mode = execution_mode
     
-    # JIT compile the N-step simulation function with bound parameters
-    self.jitted_n_step = TinyJit(lambda bodies, num_steps: _n_step_simulation(bodies, self.dt, self.gravity, num_steps, self.restitution))
+    # Initialize based on execution mode
+    if execution_mode == ExecutionMode.PURE:
+      # Pure tensor implementation - use existing JIT compilation
+      self.jitted_n_step = TinyJit(lambda bodies, num_steps: _n_step_simulation(bodies, self.dt, self.gravity, num_steps, self.restitution))
+      self.jitted_step = TinyJit(self._physics_step)
+    elif execution_mode == ExecutionMode.C:
+      # C backend - initialize with custom ops
+      self._init_c_backend()
+    elif execution_mode == ExecutionMode.WGPU:
+      # WebGPU backend - placeholder for future implementation
+      self._init_wgpu_backend()
+    else:
+      raise ValueError(f"Unsupported execution mode: {execution_mode}")
+  
+  def _init_c_backend(self):
+    """Initialize C backend with custom operations."""
+    import sys
+    from pathlib import Path
     
-    # Also keep single-step for debugging
-    self.jitted_step = TinyJit(self._physics_step)
+    # Add custom_ops to path
+    custom_ops_path = Path(__file__).parent.parent / "custom_ops"
+    sys.path.append(str(custom_ops_path))
+    
+    try:
+      from custom_ops.python.extension import enable_physics_on_device, physics_enabled
+      from custom_ops.python.patterns import physics_step as c_physics_step
+      
+      # Check if the C library is compiled
+      lib_path = custom_ops_path / "build" / ("libphysics.dylib" if sys.platform == "darwin" else "libphysics.so")
+      if not lib_path.exists():
+        raise RuntimeError("C physics library not found. Please compile it first by running: cd custom_ops/src && make")
+      
+      # Enable physics operations on CPU
+      enable_physics_on_device("CPU")
+      
+      # Store C-specific functions
+      self._c_physics_step = c_physics_step
+      self._physics_enabled = physics_enabled
+      
+      # For C backend, override the step method behavior
+      self.use_c_backend = True
+      
+      # Create JIT-compiled versions that use C ops
+      self.jitted_step = TinyJit(self._physics_step_c)
+      self.jitted_n_step = None  # C backend doesn't support N-step yet
+    except ImportError as e:
+      raise RuntimeError(f"Failed to import C backend: {e}")
+  
+  def _init_wgpu_backend(self):
+    """Initialize WebGPU backend - placeholder for future implementation."""
+    raise NotImplementedError("WebGPU backend is not yet implemented")
     
   def _physics_step(self, bodies: Tensor) -> Tensor:
     """Single physics step as a pure tensor function.
@@ -115,6 +164,18 @@ class TensorPhysicsEngine:
     """
     return _physics_step_static(bodies, self.dt, self.gravity, self.restitution)
   
+  def _physics_step_c(self, bodies: Tensor) -> Tensor:
+    """Single physics step using C custom operations.
+    
+    Args:
+      bodies: State tensor of shape (N, NUM_PROPERTIES)
+      
+    Returns:
+      Updated state tensor
+    """
+    with self._physics_enabled("CPU"):
+      return self._c_physics_step(bodies, self.dt)
+  
   def run_simulation(self, num_steps: int) -> None:
     """Run N-step simulation using the JIT-compiled function.
     
@@ -124,7 +185,13 @@ class TensorPhysicsEngine:
     Args:
       num_steps: Number of simulation steps to run
     """
-    self.bodies = self.jitted_n_step(self.bodies, num_steps)
+    if self.execution_mode == ExecutionMode.PURE and self.jitted_n_step is not None:
+      # Use optimized N-step for pure mode
+      self.bodies = self.jitted_n_step(self.bodies, num_steps)
+    else:
+      # Fall back to single-step iteration for other modes
+      for _ in range(num_steps):
+        self.step()
   
   def step(self, dt: float | None = None) -> Tensor:
     """Execute one physics simulation step.

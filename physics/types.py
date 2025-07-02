@@ -4,9 +4,15 @@ This module defines the data layout for our Structure of Arrays (SoA) approach.
 Each body's state is stored as a row in a wide tensor, with columns representing
 different properties. This layout is optimized for GPU parallelism.
 """
-from enum import IntEnum
+from enum import IntEnum, Enum
 import numpy as np
 from typing import NamedTuple
+
+class ExecutionMode(Enum):
+  """Supported physics execution backends."""
+  PURE = "pure"
+  C = "c"
+  WGPU = "wgpu"
 
 class BodySchema:
   """Column indices for body state tensor.
@@ -54,3 +60,32 @@ def create_body_array(position: np.ndarray, velocity: np.ndarray, orientation: n
   body[BodySchema.SHAPE_TYPE] = shape_type.value
   body[BodySchema.SHAPE_PARAM_1:BodySchema.SHAPE_PARAM_3+1] = shape_params
   return body
+
+# Default values for convenience
+def create_body_array_defaults(position: np.ndarray, mass: float, shape_type: ShapeType, 
+                               shape_params: np.ndarray, velocity: np.ndarray | None = None, 
+                               orientation: np.ndarray | None = None, angular_vel: np.ndarray | None = None) -> np.ndarray:
+    """Create a single body's state array with default values for optional parameters."""
+    if velocity is None:
+        velocity = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    if orientation is None:
+        orientation = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32) # Identity quaternion
+    if angular_vel is None:
+        angular_vel = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    
+    # Simple inertia for sphere/box for now
+    if shape_type == ShapeType.SPHERE:
+        radius = shape_params[0]
+        inertia_val = 2/5 * mass * radius**2
+        inertia = np.diag([inertia_val, inertia_val, inertia_val])
+    elif shape_type == ShapeType.BOX:
+        half_extents = shape_params
+        lx, ly, lz = 2*half_extents # Full lengths
+        inertia_xx = (1/12) * mass * (ly**2 + lz**2)
+        inertia_yy = (1/12) * mass * (lx**2 + lz**2)
+        inertia_zz = (1/12) * mass * (lx**2 + ly**2)
+        inertia = np.diag([inertia_xx, inertia_yy, inertia_zz])
+    else:
+        inertia = np.diag([1.0, 1.0, 1.0]) # Placeholder
+        
+    return create_body_array(position, velocity, orientation, angular_vel, mass, inertia, shape_type, shape_params)

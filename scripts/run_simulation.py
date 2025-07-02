@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Simulation workhorse for the physics engine.
+"""Simulation runner for the physics engine.
 
-This script is responsible for:
-- Defining the common interface for all physics engines.
-- Implementing wrappers for each engine (Naive, C, WebGPU).
-- Setting up a consistent initial scene for simulations.
-- Running the simulation for a specified number of steps.
-- Saving the results to the artifacts/ directory.
+This module provides the SimulationRunner class that handles:
+- Loading initial state from file
+- Translating execution mode strings to enums
+- Initializing the physics engine
+- Running the simulation loop
+- Collecting performance metrics
 """
-import argparse
-import numpy as np
 import time
+import numpy as np
 from pathlib import Path
 
 # Add parent directory to path to import physics modules
@@ -24,116 +23,134 @@ tinygrad_path = os.path.join(parent_dir, "external", "tinygrad")
 if os.path.exists(tinygrad_path):
     sys.path.insert(0, tinygrad_path)
 
+from physics.types import ExecutionMode
 from physics.engine import TensorPhysicsEngine
-from physics.engine_c import CEngine 
-
-class PhysicsEngine:
-    """Abstract base class for a physics engine wrapper."""
-    def __init__(self, bodies: np.ndarray, dt: float = 0.01):
-        raise NotImplementedError
-
-    def step(self) -> None:
-        raise NotImplementedError
-
-    def get_state(self) -> np.ndarray:
-        raise NotImplementedError
-
-class NaiveEngine(PhysicsEngine):
-    """Wrapper for the pure Python 'Oracle' engine."""
-    def __init__(self, bodies: np.ndarray, dt: float = 0.01):
-        self.engine = TensorPhysicsEngine(bodies, dt=dt)
-
-    def step(self) -> None:
-        self.engine.step()
-
-    def get_state(self) -> np.ndarray:
-        return self.engine.get_state()
 
 
-
-class WebGPUEngine(PhysicsEngine):
-    """Placeholder for the future WebGPU engine."""
-    def __init__(self, bodies: np.ndarray, dt: float = 0.01):
-        print("WebGPU Engine not implemented.")
-        self.bodies = bodies
-
-    def step(self) -> None:
-        pass
-
-    def get_state(self) -> np.ndarray:
-        return self.bodies
-
-ENGINE_MAP = {
-    'naive': NaiveEngine,
-    'c': CEngine,
-    'webgpu': WebGPUEngine,
-}
-
-def create_default_scene() -> np.ndarray:
-    """Creates a consistent set of initial bodies for simulations."""
-    from physics.types import create_body_array, ShapeType
-    bodies = []
-    # Add a static ground box
-    bodies.append(create_body_array(
-        position=np.array([0, -5, 0]),
-        mass=1e9,
-        shape_type=ShapeType.BOX,
-        shape_params=np.array([20, 1, 20])
-    ))
-    # Add some dynamic spheres
-    for i in range(5):
-        bodies.append(create_body_array(
-            position=np.array([-2.0 + i, 5.0, 0.0]),
-            mass=1.0,
-            shape_type=ShapeType.SPHERE,
-            shape_params=np.array([0.5, 0, 0])
-        ))
-    return np.stack(bodies)
-
-def main():
-    parser = argparse.ArgumentParser(description="Physics Simulation Workhorse")
-    parser.add_argument("--modes", nargs='+', required=True, help="List of engine modes to run (e.g., naive c)")
-    parser.add_argument("--steps", type=int, required=True, help="Number of simulation steps")
-    parser.add_argument("--save-all-frames", action="store_true", help="Save all frames, not just the first and last")
+class SimulationRunner:
+    """Manages physics simulation execution with configurable backends."""
     
-    args = parser.parse_args()
-    
-    initial_bodies = create_default_scene()
-    
-    for mode in args.modes:
-        if mode not in ENGINE_MAP:
-            print(f"Unknown engine mode: {mode}")
-            continue
-            
-        print(f"Running simulation for mode: {mode}")
-        engine_class = ENGINE_MAP[mode]
-        engine = engine_class(initial_bodies.copy())
+    def __init__(self, mode: str, steps: int, input_file_path: str, 
+                 enable_profiling: bool = False, collect_trajectory: bool = True):
+        """Initialize the simulation runner.
         
-        states = [engine.get_state()]
+        Args:
+            mode: Execution mode string ("pure", "c", or "wgpu")
+            steps: Number of simulation steps to execute
+            input_file_path: Path to .npy file containing initial state
+            enable_profiling: Whether to collect detailed performance metrics
+            collect_trajectory: Whether to collect full trajectory data for rendering
+        """
+        self.mode = mode
+        self.steps = steps
+        self.input_file_path = input_file_path
+        self.enable_profiling = enable_profiling
+        self.collect_trajectory = collect_trajectory
         
+        # Load initial state
+        self.initial_state = self._load_initial_state()
+        
+        # Translate mode string to enum
+        self.execution_mode = self._get_execution_mode()
+        
+        # Initialize physics engine
+        self.engine = TensorPhysicsEngine(
+            bodies=self.initial_state,
+            execution_mode=self.execution_mode
+        )
+    
+    def _load_initial_state(self) -> np.ndarray:
+        """Load initial bodies state from file.
+        
+        Returns:
+            Numpy array of shape (num_bodies, num_properties)
+        """
+        try:
+            state = np.load(self.input_file_path)
+            print(f"Loaded initial state from {self.input_file_path}")
+            print(f"  Shape: {state.shape}")
+            return state
+        except Exception as e:
+            raise RuntimeError(f"Failed to load initial state from {self.input_file_path}: {e}")
+    
+    def _get_execution_mode(self) -> ExecutionMode:
+        """Convert mode string to ExecutionMode enum.
+        
+        Returns:
+            ExecutionMode enum value
+        """
+        mode_map = {
+            "pure": ExecutionMode.PURE,
+            "c": ExecutionMode.C,
+            "wgpu": ExecutionMode.WGPU
+        }
+        
+        if self.mode not in mode_map:
+            raise ValueError(f"Unknown execution mode: {self.mode}")
+        
+        return mode_map[self.mode]
+    
+    def run(self) -> tuple[np.ndarray, dict]:
+        """Execute the simulation.
+        
+        Returns:
+            Tuple of (trajectory_or_final_state, metrics_dict)
+            If collect_trajectory is True, returns full trajectory (steps+1, num_bodies, props)
+            Otherwise returns only final state (num_bodies, props)
+        """
+        metrics = {}
+        trajectory = [] if self.collect_trajectory else None
+        
+        # Start timing
         start_time = time.time()
-        for _ in range(args.steps):
-            engine.step()
-            if args.save_all_frames:
-                states.append(engine.get_state())
         
-        if not args.save_all_frames:
-            states.append(engine.get_state())
+        # Collect initial state if needed
+        if self.collect_trajectory:
+            trajectory.append(self.engine.get_state().copy())
+        
+        if self.enable_profiling:
+            # Detailed profiling - time each step
+            step_times = []
+            for i in range(self.steps):
+                step_start = time.time()
+                self.engine.step()
+                step_end = time.time()
+                step_times.append(step_end - step_start)
+                
+                if self.collect_trajectory:
+                    trajectory.append(self.engine.get_state().copy())
             
+            metrics['profile_data'] = {
+                'avg_step_time': np.mean(step_times),
+                'min_step_time': np.min(step_times),
+                'max_step_time': np.max(step_times),
+                'std_step_time': np.std(step_times)
+            }
+        else:
+            # Normal execution - just run all steps
+            for _ in range(self.steps):
+                self.engine.step()
+                if self.collect_trajectory:
+                    trajectory.append(self.engine.get_state().copy())
+        
+        # End timing
         end_time = time.time()
-        print(f"Simulation took {end_time - start_time:.2f} seconds.")
+        total_time = end_time - start_time
         
-        # Save results
-        output_dir = Path("artifacts")
-        output_dir.mkdir(exist_ok=True)
-        timestamp = int(time.time())
-        filename = f"{mode}_sim_{args.steps}steps_{timestamp}.npy"
-        if args.save_all_frames:
-            filename = f"{mode}_sim_{args.steps}steps_{timestamp}_all.npy"
+        # Prepare return data
+        if self.collect_trajectory:
+            # Stack trajectory frames into single array
+            result_data = np.stack(trajectory)
+            print(f"Collected trajectory shape: {result_data.shape}")
+        else:
+            # Just return final state
+            result_data = self.engine.get_state()
         
-        output_path = output_dir / filename
-        np.save(output_path, np.array(states))
-        print(f"Saved simulation to: {output_path}")
-
-if __name__ == "__main__":
-    main()
+        # Calculate metrics
+        metrics['total_time'] = total_time
+        metrics['steps_per_second'] = self.steps / total_time
+        metrics['execution_mode'] = self.mode
+        metrics['num_steps'] = self.steps
+        metrics['trajectory_collected'] = self.collect_trajectory
+        
+        return result_data, metrics
