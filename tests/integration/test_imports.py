@@ -24,8 +24,7 @@ def test_core_module_imports():
         'physics.broadphase_tensor',
         'physics.narrowphase',
         'physics.solver',
-        'physics.engine',
-        'physics.main'
+        'physics.engine'
     ]
     
     for module_name in modules:

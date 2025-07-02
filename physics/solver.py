@@ -10,7 +10,8 @@ from .math_utils import get_world_inv_inertia
 
 def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Tensor, 
                       contact_depths: Tensor, contact_points: Tensor, contact_mask: Tensor,
-                      restitution: float = 0.1) -> Tensor:
+                      restitution: float = 0.1, dt: float = 0.016,
+                      baumgarte_beta: float = 0.05, baumgarte_slop: float = 0.001) -> Tensor:
   """Resolve collisions by applying impulses based on contact information.
   
   This function is fully vectorized and operates on all contacts simultaneously.
@@ -24,6 +25,9 @@ def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Te
     contact_points: Tensor of shape (M, 3) with contact points
     contact_mask: Tensor of shape (M,) boolean mask for valid contacts
     restitution: Coefficient of restitution (0 = no bounce, 1 = perfect bounce)
+    dt: Timestep in seconds
+    baumgarte_beta: Baumgarte stabilization strength (0-1)
+    baumgarte_slop: Penetration tolerance in meters
     
   Returns:
     Updated state tensor with resolved collisions
@@ -108,10 +112,16 @@ def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Te
   angular_term_a = (contact_normals * cross_product(ang_delta_a, r_a)).sum(axis=1)
   angular_term_b = (contact_normals * cross_product(ang_delta_b, r_b)).sum(axis=1)
   
-  # Calculate impulse magnitudes
-  # Standard impulse formula: j = (1 + e) * |v_rel·n| / (denominators)
-  # We want the magnitude to be positive
-  numerator = (1.0 + restitution) * (-v_rel_normal)  # -v_rel_normal because v_rel_normal < 0 for approaching
+  # Calculate impulse magnitudes with Baumgarte stabilization
+  # Modified impulse formula includes position correction bias
+  # j = (-(1 + e) * v_rel·n + bias) / (denominators)
+  # where bias = beta/dt * max(depth - slop, 0)
+  
+  # Calculate Baumgarte bias term for position correction
+  baumgarte_bias = (baumgarte_beta / dt) * (contact_depths - baumgarte_slop).maximum(0.0)
+  
+  # Combined numerator: restitution term + position correction term
+  numerator = (1.0 + restitution) * (-v_rel_normal) + baumgarte_bias
   denominator = inv_mass_a + inv_mass_b + angular_term_a + angular_term_b
   denominator = denominator.maximum(1e-6)  # Prevent division by zero
   j_magnitude = numerator / denominator
@@ -142,14 +152,8 @@ def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Te
   delta_ang_vel_a = (inv_I_world_a @ cross_product(r_a, impulse_vectors_a).unsqueeze(-1)).squeeze(-1)
   delta_ang_vel_b = (inv_I_world_b @ cross_product(r_b, impulse_vectors_b).unsqueeze(-1)).squeeze(-1)
   
-  # Position correction (Baumgarte stabilization)
-  correction_percent = 0.2
-  slop = 0.01
-  correction_amount = ((contact_depths - slop).maximum(0.0) / (inv_mass_a + inv_mass_b).maximum(1e-6) * correction_percent)
-  correction_vec = correction_amount.unsqueeze(1) * contact_normals * active_mask_3d.float()
-  
-  delta_pos_a = correction_vec * inv_mass_a.unsqueeze(1)
-  delta_pos_b = -correction_vec * inv_mass_b.unsqueeze(1)
+  # Position correction is now integrated into the impulse via Baumgarte stabilization
+  # No separate position teleportation needed!
   
   # Now we need to scatter the changes back to the bodies tensor
   # We'll use scatter operations to accumulate the changes
@@ -160,12 +164,6 @@ def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Te
   # Prepare indices for scattering
   # We need to flatten the multi-dimensional updates
   n_bodies = bodies.shape[0]
-  
-  # For positions (3 components per body)
-  pos_indices_a = indices_a.unsqueeze(1).expand(-1, 3) * BodySchema.NUM_PROPERTIES + \
-                   Tensor.arange(BodySchema.POS_X, BodySchema.POS_Z+1).unsqueeze(0)
-  pos_indices_b = indices_b.unsqueeze(1).expand(-1, 3) * BodySchema.NUM_PROPERTIES + \
-                   Tensor.arange(BodySchema.POS_X, BodySchema.POS_Z+1).unsqueeze(0)
   
   # For velocities (3 components per body)
   vel_indices_a = indices_a.unsqueeze(1).expand(-1, 3) * BodySchema.NUM_PROPERTIES + \
@@ -182,10 +180,6 @@ def resolve_collisions(bodies: Tensor, pair_indices: Tensor, contact_normals: Te
   # Flatten the bodies and delta arrays for scatter
   bodies_flat = bodies.flatten()
   delta_flat = Tensor.zeros_like(bodies_flat)
-  
-  # Scatter position changes
-  delta_flat = delta_flat.scatter_reduce(0, pos_indices_a.flatten(), delta_pos_a.flatten(), "sum")
-  delta_flat = delta_flat.scatter_reduce(0, pos_indices_b.flatten(), delta_pos_b.flatten(), "sum")
   
   # Scatter velocity changes
   delta_flat = delta_flat.scatter_reduce(0, vel_indices_a.flatten(), delta_vel_a.flatten(), "sum")

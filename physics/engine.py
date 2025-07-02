@@ -11,7 +11,8 @@ from .broadphase_tensor import differentiable_broadphase
 from .narrowphase import narrowphase
 from .solver import resolve_collisions
 
-def _physics_step_static(bodies: Tensor, dt: float, gravity: Tensor, restitution: float = 0.1) -> Tensor:
+def _physics_step_static(bodies: Tensor, dt: float, gravity: Tensor, restitution: float = 0.1,
+                        baumgarte_beta: float = 0.05, baumgarte_slop: float = 0.001) -> Tensor:
   """Static physics step function for use in N-step simulation.
   
   This function is defined outside the class so it can be called
@@ -22,6 +23,8 @@ def _physics_step_static(bodies: Tensor, dt: float, gravity: Tensor, restitution
     dt: Timestep in seconds
     gravity: Gravity acceleration vector
     restitution: Coefficient of restitution for collisions
+    baumgarte_beta: Baumgarte stabilization strength
+    baumgarte_slop: Penetration tolerance
     
   Returns:
     Updated state tensor
@@ -37,7 +40,8 @@ def _physics_step_static(bodies: Tensor, dt: float, gravity: Tensor, restitution
   # 3. Collision resolution
   bodies = resolve_collisions(
     bodies, pair_indices, contact_normals, contact_depths, 
-    contact_points, contact_mask, restitution=0.1
+    contact_points, contact_mask, restitution=restitution,
+    dt=dt, baumgarte_beta=baumgarte_beta, baumgarte_slop=baumgarte_slop
   )
   
   # 4. Integration (motion)
@@ -45,7 +49,9 @@ def _physics_step_static(bodies: Tensor, dt: float, gravity: Tensor, restitution
   
   return bodies
 
-def _n_step_simulation(initial_bodies: Tensor, dt: float, gravity: Tensor, num_steps: int, restitution: float = 0.1) -> Tensor:
+def _n_step_simulation(initial_bodies: Tensor, dt: float, gravity: Tensor, num_steps: int, 
+                      restitution: float = 0.1, baumgarte_beta: float = 0.05, 
+                      baumgarte_slop: float = 0.001) -> Tensor:
   """N-step simulation function that can be JIT-compiled.
   
   This function contains the simulation loop and will be unrolled by TinyJit
@@ -57,13 +63,15 @@ def _n_step_simulation(initial_bodies: Tensor, dt: float, gravity: Tensor, num_s
     gravity: Gravity acceleration vector
     num_steps: Number of simulation steps to run
     restitution: Coefficient of restitution for collisions
+    baumgarte_beta: Baumgarte stabilization strength
+    baumgarte_slop: Penetration tolerance
     
   Returns:
     Final state tensor after N steps
   """
   bodies = initial_bodies
   for _ in range(num_steps):
-    bodies = _physics_step_static(bodies, dt, gravity)
+    bodies = _physics_step_static(bodies, dt, gravity, restitution, baumgarte_beta, baumgarte_slop)
   return bodies
 
 class TensorPhysicsEngine:
@@ -81,7 +89,8 @@ class TensorPhysicsEngine:
   
   def __init__(self, bodies: np.ndarray, gravity: np.ndarray = np.array([0, -9.81, 0], dtype=np.float32),
                dt: float = 0.016, restitution: float = 0.1, use_differentiable: bool = True,
-               execution_mode: ExecutionMode = ExecutionMode.PURE):
+               execution_mode: ExecutionMode = ExecutionMode.PURE,
+               baumgarte_beta: float = 0.05, baumgarte_slop: float = 0.001):
     """Initialize physics engine with JIT compilation.
     
     Args:
@@ -91,18 +100,24 @@ class TensorPhysicsEngine:
       restitution: Coefficient of restitution for collisions (0-1)
       use_differentiable: Use differentiable broadphase (always True for JIT)
       execution_mode: Backend execution mode (PURE, C, or WGPU)
+      baumgarte_beta: Baumgarte stabilization strength (0-1, default 0.2)
+      baumgarte_slop: Penetration tolerance in meters (default 0.01)
     """
     self.bodies = Tensor(bodies.astype(np.float32))
     self.gravity = Tensor(gravity.astype(np.float32))
     self.dt = dt
     self.restitution = restitution
+    self.baumgarte_beta = baumgarte_beta
+    self.baumgarte_slop = baumgarte_slop
     self.use_differentiable = True  # Always use differentiable for JIT
     self.execution_mode = execution_mode
     
     # Initialize based on execution mode
     if execution_mode == ExecutionMode.PURE:
       # Pure tensor implementation - use existing JIT compilation
-      self.jitted_n_step = TinyJit(lambda bodies, num_steps: _n_step_simulation(bodies, self.dt, self.gravity, num_steps, self.restitution))
+      self.jitted_n_step = TinyJit(lambda bodies, num_steps: _n_step_simulation(
+        bodies, self.dt, self.gravity, num_steps, self.restitution, 
+        self.baumgarte_beta, self.baumgarte_slop))
       self.jitted_step = TinyJit(self._physics_step)
     elif execution_mode == ExecutionMode.C:
       # C backend - initialize with custom ops
@@ -162,7 +177,8 @@ class TensorPhysicsEngine:
     Returns:
       Updated state tensor
     """
-    return _physics_step_static(bodies, self.dt, self.gravity, self.restitution)
+    return _physics_step_static(bodies, self.dt, self.gravity, self.restitution,
+                               self.baumgarte_beta, self.baumgarte_slop)
   
   def _physics_step_c(self, bodies: Tensor) -> Tensor:
     """Single physics step using C custom operations.
