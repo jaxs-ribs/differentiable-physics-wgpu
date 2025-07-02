@@ -138,3 +138,115 @@ Never mix functionality changes with whitespace changes. All functionality chang
 ## style
 
 Use **2-space indentation**, and keep lines to a maximum of **150 characters**. Match the existing style.
+
+
+
+---
+
+Note: We're now making an update: 
+
+### Comprehensive roadmap — minimal engine now, full head-room later
+
+(Every bullet is a concrete deliverable that can land as a pull-request and leave `main` usable.)
+
+---
+
+#### Ground rules that never change
+
+* **Tensor layout** `state = {x: [B, N, 3], q: [B, N, 4], v: [B, N, 3], ω: [B, N, 3]}`; batch first for easy GPU fusion.
+* **Autograd discipline** Every math op lives in tinygrad; no Python `for` except the outer XPBD iteration loop.
+* **One-kernel philosophy** Forward integrate → constraint solve → velocity update must fuse into a single WGSL compute kernel later; write the Python oracle in that style from day 1.
+
+---
+
+### Milestone 0 Scaffold (week 1)
+
+* Repo, tests, CI timing benchmark.
+* `integrate()` in tinygrad (semi-implicit Euler) moving a single box in free fall.
+* Deliverable: gravity drop GIF committed; CI prints steps/s.
+
+---
+
+### Milestone 1 Collision stack (weeks 2-3)
+
+**Broad-phase (differentiable)**
+
+* Uniform spatial hash: insert AABB centre positions; no branches → gradient flows.
+* Hash built with pure tensor gather/scatter so it ports to WGSL unchanged.
+
+**Narrow-phase (differentiable contact generation)**
+
+* Shapes: sphere + box.
+* Contact points via analytical overlap tests (sphere/plane, box/plane, sphere/sphere).
+* Soft normal “penetration = max(0, d)” replaced by `softplus(d, β)` so gradients exist.
+
+**Deliverables**
+
+* Ten-cube stack settles; `grad(sum(contact_penetrations))` is finite and non-zero.
+* CI target ≥50 k steps/s on RTX-class GPU in Python oracle.
+
+---
+
+### Milestone 2 XPBD constraint core (weeks 4-5)
+
+* 8-iteration Jacobi XPBD loop in one tinygrad function.
+* Constraint registry (`@register("hinge")`, `"ball"`, `"contact"`).
+* Tests: pendulum length error <1 mm for 10 s; gradients w\.r.t. link length match finite-diff within 1 %.
+
+---
+
+### Milestone 3 Actuator stub (week 6)
+
+* Torque motor on any hinge (scalar input).
+* Gym-style `step(action)` wrapper so RL scripts run without muscles yet.
+* Deliverable: PPO balances inverted pendulum in <30 min.
+
+---
+
+### Milestone 4 WGSL backend (weeks 7-8)
+
+* Replace tinygrad CPU kernels with `Ops.CUSTOM("xpbd_step")` in WGSL.
+* Mirror Python oracle byte-for-byte; CI runs oracle vs WGSL and asserts `max|Δ| < 1e-5`.
+* Throughput goal ≥300 k steps/s for 256-pendulum batch on desktop GPU.
+
+---
+
+### Milestone 5 Tendons and Hill muscle (weeks 9-10)
+
+* Distance constraint with compliance → tendon.
+* Hill-type force law (activation filter, fl/ fv/ fp curves) stored as tensors; feeds desired rest length into tendon constraint.
+* Demo: two-link planar leg driven by flexor/extensor muscles, keyboard input toggles activation.
+
+---
+
+### Milestone 6 Batch RL test (weeks 11-12)
+
+* Humanoid lower-body with nine muscles (per leg).
+* Train SAC to walk 1 m s⁻¹ on 512-env batch; watch reward curve for smooth rise.
+* Publish walkthrough notebook; serves as gradient-correctness proof.
+
+---
+
+### Milestone 7 Continuous collision option (week 13) — optional but future-proof
+
+* Conservative advancement for spheres, swept separating axis for boxes.
+* Added as alt contact generator in registry; toggle via scene JSON.
+
+---
+
+### Milestone 8 Scene I/O + accuracy hook (weeks 14-15)
+
+* JSON ⇄ MJCF converter; keeps joint indices stable.
+* CLI `--accurate` pipes state into MJX via JAX for one step, returns result; gradients stop at that call, preserving differentiability elsewhere.
+
+---
+
+### Why this meets “maximum results / minimal effort / maximum optionality”
+
+* **Early wins:** by week 5 you already have a differentiable, GPU-batched rigid-body engine usable for RL projects.
+* **Collision path is locked but lightweight:** spatial hash + analytic overlaps get you to humanoid walking without touching GJK/EPA; you can swap in fancier solvers later without breaking outside code.
+* **Nothing blocks WebGPU:** every tensor op you write in Python has a WGSL analogue, proven at Milestone 4.
+* **Muscle layer is additive:** tendons + Hill live solely in the constraint registry; removing them never disturbs core physics.
+* **Accuracy escape hatch:** MJX hook lets any user trade speed for fidelity without engine changes.
+
+Follow these milestones and you leave yourself free to pause or pivot after each one while always having a working, differentiable simulator that runs on TinyGrad and accelerates on WGPU.
