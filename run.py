@@ -3,237 +3,182 @@
 
 This script provides a complete pipeline for physics simulation and visualization:
 simulate → collect trajectory → render video.
-
-Usage:
-    # Run with defaults (pure mode, 200 steps, render video)
-    python3 run.py
-    
-    # Run C-accelerated simulation with custom video output
-    python3 run.py --mode c --steps 500 --video-output my_simulation.mp4
-    
-    # Run without rendering (performance testing)
-    python3 run.py --no-render
-    
-    # Save final state for checkpointing
-    python3 run.py --final-state-output checkpoint.npy
-    
-    # Custom video settings (override auto-calculated duration)
-    python3 run.py --video-duration 10.0 --video-fps 30
-    
-    # Run with profiling
-    python3 run.py --profile
 """
-import argparse
-import time
-import numpy as np
-from pathlib import Path
-from datetime import datetime
-import tempfile
+import sys
 import os
+from pathlib import Path
+import numpy as np
 
 # Add parent directory to path
-import sys
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, parent_dir)
 
-# Import the simulation runner and renderer
+# Import modular components
+from scripts.cli_parser import create_argument_parser
+from scripts.config import SimulationConfig, RenderingConfig, OutputConfig
+from scripts.file_operations import (
+    ensure_initial_state_exists,
+    generate_timestamped_filename,
+    save_numpy_array,
+    create_temporary_file,
+    safe_delete_file,
+    extract_final_state
+)
+from scripts.output_handler import SimulationOutputHandler
 from scripts.run_simulation import SimulationRunner
 from scripts.renderer import RendererInvoker
+from scripts.error_handler import ErrorHandler, SimulationError
 
-def get_timestamped_filename(prefix: str = "simulation", extension: str = "mp4") -> str:
-    """Generate a timestamped filename."""
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    return f"{prefix}_{timestamp}.{extension}"
 
-def main():
-    """Main entry point for physics simulation and rendering."""
-    # Define argument parser with defaults
-    parser = argparse.ArgumentParser(
-        description="Physics Engine - Simulation and rendering pipeline",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
-    )
+def run_simulation_pipeline(sim_config: SimulationConfig, 
+                           render_config: RenderingConfig,
+                           output_config: OutputConfig,
+                           output_handler: SimulationOutputHandler) -> None:
+    """Execute the complete simulation pipeline.
     
-    parser.add_argument(
-        "--mode",
-        type=str,
-        default="pure",
-        choices=["pure", "c", "wgpu"],
-        help="Physics execution backend (default: pure)"
-    )
-    
-    parser.add_argument(
-        "--steps",
-        type=int,
-        default=200,
-        help="Number of simulation steps (default: 200)"
-    )
-    
-    parser.add_argument(
-        "--input-file",
-        type=str,
-        default="artifacts/initial_state.npy",
-        help="Path to initial state .npy file (default: artifacts/initial_state.npy)"
-    )
-    
-    parser.add_argument(
-        "--final-state-output",
-        type=str,
-        help="Path to save final simulation state .npy file (optional)"
-    )
-    
-    parser.add_argument(
-        "--video-output",
-        type=str,
-        help=f"Path to save rendered video (default: artifacts/simulation_TIMESTAMP.mp4)"
-    )
-    
-    parser.add_argument(
-        "--no-render",
-        action="store_true",
-        help="Disable video rendering (for performance testing)"
-    )
-    
-    parser.add_argument(
-        "--video-duration",
-        type=float,
-        help="Video duration in seconds (default: auto-calculated from simulation)"
-    )
-    
-    parser.add_argument(
-        "--video-fps",
-        type=int,
-        default=60,
-        help="Video frames per second (default: 60)"
-    )
-    
-    parser.add_argument(
-        "--profile",
-        action="store_true",
-        help="Enable performance profiling"
-    )
-    
-    # Parse arguments
-    args = parser.parse_args()
-    
-    # Handle input file - create default if needed
-    input_path = Path(args.input_file)
-    if not input_path.exists():
-        if args.input_file == "artifacts/initial_state.npy":  # Using default
-            print(f"Default initial state not found. Creating it...")
-            # Import the scene creation function
-            from scripts.create_default_scene import create_default_scene
-            
-            # Create artifacts directory if needed
-            artifacts_dir = Path("artifacts")
-            artifacts_dir.mkdir(exist_ok=True)
-            
-            # Generate and save default scene
-            initial_state = create_default_scene()
-            np.save(input_path, initial_state)
-            print(f"Created default initial state: {input_path}")
-            print(f"  Shape: {initial_state.shape}")
-        else:
-            print(f"Error: Input file '{args.input_file}' not found.")
-            sys.exit(1)
-    
-    # Determine if we need to collect trajectory
-    collect_trajectory = not args.no_render
-    
-    # Create simulation runner with resolved configuration
+    Args:
+        sim_config: Simulation configuration
+        render_config: Rendering configuration
+        output_config: Output configuration
+        output_handler: Output handler for console messages
+    """
+    # Run simulation
     runner = SimulationRunner(
-        mode=args.mode,
-        steps=args.steps,
-        input_file_path=args.input_file,
-        enable_profiling=args.profile,
-        collect_trajectory=collect_trajectory
+        mode=sim_config.mode.value,
+        steps=sim_config.steps,
+        input_file_path=str(sim_config.input_file),
+        enable_profiling=sim_config.enable_profiling,
+        collect_trajectory=sim_config.collect_trajectory
     )
     
-    # Run the simulation
-    print(f"Running {args.mode} mode simulation for {args.steps} steps...")
-    if args.no_render:
-        print("Rendering disabled - trajectory collection skipped")
+    output_handler.print_simulation_start(
+        sim_config.mode.value, 
+        sim_config.steps,
+        render_config.enabled
+    )
     
     simulation_data, metrics = runner.run()
     
-    # Print summary statistics
-    print("\nSimulation Complete!")
-    print(f"Total time: {metrics['total_time']:.3f} seconds")
-    print(f"Steps per second: {metrics['steps_per_second']:.1f}")
-    
-    if args.profile and 'profile_data' in metrics:
-        print("\nProfiling data:")
-        for key, value in metrics['profile_data'].items():
-            print(f"  {key}: {value}")
+    output_handler.print_simulation_complete(metrics)
+    output_handler.print_profiling_data(metrics.get('profile_data'))
     
     # Handle rendering if enabled
-    if not args.no_render:
-        # Prepare video output path
-        if args.video_output:
-            video_path = Path(args.video_output)
-        else:
-            artifacts_dir = Path("artifacts")
-            artifacts_dir.mkdir(exist_ok=True)
-            video_path = artifacts_dir / get_timestamped_filename("simulation", "mp4")
-        
-        # Create parent directory if needed
-        video_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Save trajectory to temporary file
-        with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as tmp_file:
-            tmp_trajectory_path = tmp_file.name
-            
-            # Format trajectory for renderer
-            formatted_trajectory = RendererInvoker.format_trajectory_for_renderer(simulation_data)
-            np.save(tmp_trajectory_path, formatted_trajectory)
-            
-            print(f"\nRendering video to: {video_path}")
-            
-            # Calculate video duration based on simulation
-            # Default physics timestep is 0.016s (60 Hz)
-            physics_timestep = 0.016  # TODO: Get this from the engine
-            if args.video_duration:
-                video_duration = args.video_duration
-            else:
-                # Auto-calculate duration: steps * timestep
-                video_duration = args.steps * physics_timestep
-                print(f"Video duration: {video_duration:.2f}s ({args.steps} steps × {physics_timestep}s)")
-            
-            # Create renderer invoker
-            renderer = RendererInvoker(
-                trajectory_path=tmp_trajectory_path,
-                video_output_path=str(video_path),
-                duration=video_duration,
-                fps=args.video_fps
-            )
-            
-            # Render the video
-            # Use --gpu flag for C mode, --oracle for others
-            use_gpu_flag = (args.mode == "c")
-            success = renderer.render(use_gpu_flag=use_gpu_flag)
-            
-            # Clean up temporary file
-            try:
-                os.unlink(tmp_trajectory_path)
-            except:
-                pass
-            
-            if not success:
-                print("Warning: Video rendering failed", file=sys.stderr)
+    if render_config.enabled:
+        render_video(simulation_data, sim_config, render_config, output_handler)
     
     # Save final state if requested
-    if args.final_state_output:
-        output_path = Path(args.final_state_output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_config.final_state_output:
+        save_final_state(simulation_data, output_config, sim_config, output_handler)
+
+
+def render_video(simulation_data, sim_config, render_config, output_handler):
+    """Render simulation trajectory to video.
+    
+    Args:
+        simulation_data: Trajectory data from simulation
+        sim_config: Simulation configuration
+        render_config: Rendering configuration
+        output_handler: Output handler for console messages
+    """
+    # Prepare video output path
+    if render_config.video_output:
+        video_path = render_config.video_output
+    else:
+        artifacts_dir = Path("artifacts")
+        artifacts_dir.mkdir(exist_ok=True)
+        video_path = artifacts_dir / generate_timestamped_filename("simulation", "mp4")
+    
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Save trajectory to temporary file
+    tmp_file = create_temporary_file('.npy')
+    tmp_trajectory_path = tmp_file.name
+    
+    try:
+        # Format and save trajectory
+        formatted_trajectory = RendererInvoker.format_trajectory_for_renderer(simulation_data)
+        save_numpy_array(formatted_trajectory, Path(tmp_trajectory_path))
         
-        # Extract final state from trajectory or use directly
-        if collect_trajectory:
-            final_state = simulation_data[-1]  # Last frame
+        output_handler.print_video_rendering_start(video_path)
+        
+        # Calculate video duration
+        physics_timestep = 0.016  # TODO: Get from physics constants
+        if render_config.duration:
+            video_duration = render_config.duration
         else:
-            final_state = simulation_data
+            video_duration = sim_config.steps * physics_timestep
+            output_handler.print_video_duration(
+                video_duration, sim_config.steps, physics_timestep
+            )
         
-        np.save(output_path, final_state)
-        print(f"\nFinal state saved to: {output_path}")
+        # Create and run renderer
+        renderer = RendererInvoker(
+            trajectory_path=tmp_trajectory_path,
+            video_output_path=str(video_path),
+            duration=video_duration,
+            fps=render_config.fps
+        )
+        
+        use_gpu_flag = (sim_config.mode.value == "c")
+        success = renderer.render(use_gpu_flag=use_gpu_flag)
+        
+        if success:
+            output_handler.print_video_saved(video_path)
+        else:
+            output_handler.print_rendering_failed()
+    
+    finally:
+        safe_delete_file(tmp_trajectory_path)
+
+
+def save_final_state(simulation_data, output_config, sim_config, output_handler):
+    """Save the final simulation state to file.
+    
+    Args:
+        simulation_data: Simulation trajectory or final state
+        output_config: Output configuration
+        sim_config: Simulation configuration
+        output_handler: Output handler for console messages
+    """
+    final_state = extract_final_state(
+        simulation_data, 
+        sim_config.collect_trajectory
+    )
+    
+    save_numpy_array(final_state, output_config.final_state_output)
+    output_handler.print_final_state_saved(output_config.final_state_output)
+
+
+def main():
+    """Main entry point for physics simulation and rendering."""
+    # Initialize error handler
+    error_handler = ErrorHandler(verbose=True)
+    
+    try:
+        # Parse command-line arguments
+        parser = create_argument_parser()
+        args = parser.parse_args()
+        
+        # Create configurations from arguments
+        sim_config = SimulationConfig.from_args(args)
+        render_config = RenderingConfig.from_args(args)
+        output_config = OutputConfig.from_args(args)
+        
+        # Create output handler
+        output_handler = SimulationOutputHandler(verbose=True)
+        
+        # Ensure initial state exists
+        with error_handler.error_context("ensure initial state exists"):
+            ensure_initial_state_exists(sim_config.input_file)
+        
+        # Run the simulation pipeline
+        with error_handler.error_context("run simulation pipeline"):
+            run_simulation_pipeline(sim_config, render_config, output_config, output_handler)
+            
+    except SimulationError as e:
+        error_handler.handle_error(e, critical=True)
+    except Exception as e:
+        error_handler.handle_error(e, critical=True)
 
 if __name__ == "__main__":
     main()

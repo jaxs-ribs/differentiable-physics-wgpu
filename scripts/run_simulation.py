@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Simulation runner for the physics engine.
 
-This module provides the SimulationRunner class that handles:
-- Loading initial state from file
-- Translating execution mode strings to enums
-- Initializing the physics engine
-- Running the simulation loop
-- Collecting performance metrics
+Follows Single Responsibility Principle - handles only simulation execution.
+Separates concerns: state loading, metrics collection, and trajectory management.
 """
 import time
 import numpy as np
 from pathlib import Path
+from typing import Tuple, Dict, List, Optional
+from dataclasses import dataclass
 
 # Add parent directory to path to import physics modules
 import sys
@@ -25,6 +23,159 @@ if os.path.exists(tinygrad_path):
 
 from physics.types import ExecutionMode
 from physics.engine import TensorPhysicsEngine
+
+
+@dataclass
+class SimulationMetrics:
+    """Encapsulates simulation performance metrics."""
+    total_time: float
+    steps_per_second: float
+    execution_mode: str
+    num_steps: int
+    trajectory_collected: bool
+    profile_data: Optional[Dict[str, float]] = None
+    
+    def to_dict(self) -> Dict[str, any]:
+        """Convert metrics to dictionary format."""
+        result = {
+            'total_time': self.total_time,
+            'steps_per_second': self.steps_per_second,
+            'execution_mode': self.execution_mode,
+            'num_steps': self.num_steps,
+            'trajectory_collected': self.trajectory_collected
+        }
+        if self.profile_data:
+            result['profile_data'] = self.profile_data
+        return result
+
+
+class StateLoader:
+    """Handles loading initial state from file."""
+    
+    @staticmethod
+    def load_initial_state(file_path: str) -> np.ndarray:
+        """Load initial bodies state from file.
+        
+        Args:
+            file_path: Path to the .npy file
+            
+        Returns:
+            Numpy array of shape (num_bodies, num_properties)
+            
+        Raises:
+            RuntimeError: If loading fails
+        """
+        try:
+            state = np.load(file_path)
+            print(f"Loaded initial state from {file_path}")
+            print(f"  Shape: {state.shape}")
+            return state
+        except Exception as e:
+            raise RuntimeError(f"Failed to load initial state from {file_path}: {e}")
+
+
+class TrajectoryCollector:
+    """Manages trajectory collection during simulation."""
+    
+    def __init__(self, collect: bool = True):
+        """Initialize the trajectory collector.
+        
+        Args:
+            collect: Whether to collect trajectory data
+        """
+        self.collect = collect
+        self.trajectory: List[np.ndarray] = [] if collect else None
+    
+    def add_frame(self, state: np.ndarray) -> None:
+        """Add a frame to the trajectory.
+        
+        Args:
+            state: Current simulation state
+        """
+        if self.collect:
+            self.trajectory.append(state.copy())
+    
+    def get_result(self, final_state: np.ndarray) -> np.ndarray:
+        """Get the collected trajectory or final state.
+        
+        Args:
+            final_state: The final simulation state
+            
+        Returns:
+            Either the full trajectory or just the final state
+        """
+        if self.collect:
+            result = np.stack(self.trajectory)
+            print(f"Collected trajectory shape: {result.shape}")
+            return result
+        else:
+            return final_state
+
+
+class SimulationProfiler:
+    """Handles performance profiling of simulation steps."""
+    
+    def __init__(self, enabled: bool = False):
+        """Initialize the profiler.
+        
+        Args:
+            enabled: Whether profiling is enabled
+        """
+        self.enabled = enabled
+        self.step_times: List[float] = [] if enabled else None
+    
+    def record_step_time(self, duration: float) -> None:
+        """Record the duration of a simulation step.
+        
+        Args:
+            duration: Time taken for the step in seconds
+        """
+        if self.enabled:
+            self.step_times.append(duration)
+    
+    def get_profile_data(self) -> Optional[Dict[str, float]]:
+        """Get profiling statistics.
+        
+        Returns:
+            Dictionary with profiling metrics or None if disabled
+        """
+        if not self.enabled or not self.step_times:
+            return None
+        
+        return {
+            'avg_step_time': np.mean(self.step_times),
+            'min_step_time': np.min(self.step_times),
+            'max_step_time': np.max(self.step_times),
+            'std_step_time': np.std(self.step_times)
+        }
+
+
+class ExecutionModeMapper:
+    """Maps string mode names to ExecutionMode enums."""
+    
+    MODE_MAP = {
+        "pure": ExecutionMode.PURE,
+        "c": ExecutionMode.C,
+        "wgpu": ExecutionMode.WGPU
+    }
+    
+    @classmethod
+    def get_execution_mode(cls, mode_string: str) -> ExecutionMode:
+        """Convert mode string to ExecutionMode enum.
+        
+        Args:
+            mode_string: Mode name as string
+            
+        Returns:
+            ExecutionMode enum value
+            
+        Raises:
+            ValueError: If mode is unknown
+        """
+        if mode_string not in cls.MODE_MAP:
+            raise ValueError(f"Unknown execution mode: {mode_string}")
+        
+        return cls.MODE_MAP[mode_string]
 
 
 class SimulationRunner:
@@ -43,15 +194,17 @@ class SimulationRunner:
         """
         self.mode = mode
         self.steps = steps
-        self.input_file_path = input_file_path
-        self.enable_profiling = enable_profiling
-        self.collect_trajectory = collect_trajectory
+        
+        # Initialize components
+        self.state_loader = StateLoader()
+        self.trajectory_collector = TrajectoryCollector(collect_trajectory)
+        self.profiler = SimulationProfiler(enable_profiling)
         
         # Load initial state
-        self.initial_state = self._load_initial_state()
+        self.initial_state = self.state_loader.load_initial_state(input_file_path)
         
-        # Translate mode string to enum
-        self.execution_mode = self._get_execution_mode()
+        # Get execution mode
+        self.execution_mode = ExecutionModeMapper.get_execution_mode(mode)
         
         # Initialize physics engine
         self.engine = TensorPhysicsEngine(
@@ -59,98 +212,73 @@ class SimulationRunner:
             execution_mode=self.execution_mode
         )
     
-    def _load_initial_state(self) -> np.ndarray:
-        """Load initial bodies state from file.
-        
-        Returns:
-            Numpy array of shape (num_bodies, num_properties)
-        """
-        try:
-            state = np.load(self.input_file_path)
-            print(f"Loaded initial state from {self.input_file_path}")
-            print(f"  Shape: {state.shape}")
-            return state
-        except Exception as e:
-            raise RuntimeError(f"Failed to load initial state from {self.input_file_path}: {e}")
-    
-    def _get_execution_mode(self) -> ExecutionMode:
-        """Convert mode string to ExecutionMode enum.
-        
-        Returns:
-            ExecutionMode enum value
-        """
-        mode_map = {
-            "pure": ExecutionMode.PURE,
-            "c": ExecutionMode.C,
-            "wgpu": ExecutionMode.WGPU
-        }
-        
-        if self.mode not in mode_map:
-            raise ValueError(f"Unknown execution mode: {self.mode}")
-        
-        return mode_map[self.mode]
-    
-    def run(self) -> tuple[np.ndarray, dict]:
+    def run(self) -> Tuple[np.ndarray, Dict[str, any]]:
         """Execute the simulation.
         
         Returns:
             Tuple of (trajectory_or_final_state, metrics_dict)
-            If collect_trajectory is True, returns full trajectory (steps+1, num_bodies, props)
-            Otherwise returns only final state (num_bodies, props)
         """
-        metrics = {}
-        trajectory = [] if self.collect_trajectory else None
+        # Record initial state
+        self.trajectory_collector.add_frame(self.engine.get_state())
         
-        # Start timing
+        # Run simulation
+        total_time = self._run_simulation_loop()
+        
+        # Get results
+        final_state = self.engine.get_state()
+        result_data = self.trajectory_collector.get_result(final_state)
+        
+        # Build metrics
+        metrics = self._build_metrics(total_time)
+        
+        return result_data, metrics.to_dict()
+    
+    def _run_simulation_loop(self) -> float:
+        """Run the main simulation loop.
+        
+        Returns:
+            Total execution time in seconds
+        """
         start_time = time.time()
         
-        # Collect initial state if needed
-        if self.collect_trajectory:
-            trajectory.append(self.engine.get_state().copy())
-        
-        if self.enable_profiling:
-            # Detailed profiling - time each step
-            step_times = []
-            for i in range(self.steps):
-                step_start = time.time()
-                self.engine.step()
-                step_end = time.time()
-                step_times.append(step_end - step_start)
-                
-                if self.collect_trajectory:
-                    trajectory.append(self.engine.get_state().copy())
-            
-            metrics['profile_data'] = {
-                'avg_step_time': np.mean(step_times),
-                'min_step_time': np.min(step_times),
-                'max_step_time': np.max(step_times),
-                'std_step_time': np.std(step_times)
-            }
+        if self.profiler.enabled:
+            self._run_profiled_simulation()
         else:
-            # Normal execution - just run all steps
-            for _ in range(self.steps):
-                self.engine.step()
-                if self.collect_trajectory:
-                    trajectory.append(self.engine.get_state().copy())
+            self._run_normal_simulation()
         
-        # End timing
         end_time = time.time()
-        total_time = end_time - start_time
+        return end_time - start_time
+    
+    def _run_profiled_simulation(self) -> None:
+        """Run simulation with step-by-step profiling."""
+        for _ in range(self.steps):
+            step_start = time.time()
+            self.engine.step()
+            step_end = time.time()
+            
+            self.profiler.record_step_time(step_end - step_start)
+            self.trajectory_collector.add_frame(self.engine.get_state())
+    
+    def _run_normal_simulation(self) -> None:
+        """Run simulation without profiling."""
+        for _ in range(self.steps):
+            self.engine.step()
+            self.trajectory_collector.add_frame(self.engine.get_state())
+    
+    def _build_metrics(self, total_time: float) -> SimulationMetrics:
+        """Build simulation metrics.
         
-        # Prepare return data
-        if self.collect_trajectory:
-            # Stack trajectory frames into single array
-            result_data = np.stack(trajectory)
-            print(f"Collected trajectory shape: {result_data.shape}")
-        else:
-            # Just return final state
-            result_data = self.engine.get_state()
-        
-        # Calculate metrics
-        metrics['total_time'] = total_time
-        metrics['steps_per_second'] = self.steps / total_time
-        metrics['execution_mode'] = self.mode
-        metrics['num_steps'] = self.steps
-        metrics['trajectory_collected'] = self.collect_trajectory
-        
-        return result_data, metrics
+        Args:
+            total_time: Total simulation time in seconds
+            
+        Returns:
+            SimulationMetrics object
+        """
+        return SimulationMetrics(
+            total_time=total_time,
+            steps_per_second=self.steps / total_time,
+            execution_mode=self.mode,
+            num_steps=self.steps,
+            trajectory_collected=self.trajectory_collector.collect,
+            profile_data=self.profiler.get_profile_data()
+        )
