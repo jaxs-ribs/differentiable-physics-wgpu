@@ -150,3 +150,6 @@ Cargo.lock
 ehthumbs.db
 Thumbs.db
 
+# Video files
+*.mp4
+**/*.mp4
