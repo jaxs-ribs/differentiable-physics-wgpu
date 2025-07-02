@@ -143,7 +143,8 @@ class RendererInvoker:
         
         # Mass = 1 / inv_mass (handle infinite mass)
         inv_mass = trajectory[:, :, 13]
-        mass = np.where(inv_mass > 0, 1.0 / inv_mass, 1e9)
+        with np.errstate(divide='ignore'):
+            mass = np.where(inv_mass > 0, 1.0 / inv_mass, 1e9)
         renderer_data[:, :, 13] = mass
         
         renderer_data[:, :, 14] = trajectory[:, :, 23]      # Shape type

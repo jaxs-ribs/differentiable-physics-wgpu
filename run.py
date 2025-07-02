@@ -16,6 +16,12 @@ Usage:
     
     # Save final state for checkpointing
     python3 run.py --final-state-output checkpoint.npy
+    
+    # Custom video settings (override auto-calculated duration)
+    python3 run.py --video-duration 10.0 --video-fps 30
+    
+    # Run with profiling
+    python3 run.py --profile
 """
 import argparse
 import time
@@ -91,8 +97,7 @@ def main():
     parser.add_argument(
         "--video-duration",
         type=float,
-        default=5.0,
-        help="Video duration in seconds (default: 5.0)"
+        help="Video duration in seconds (default: auto-calculated from simulation)"
     )
     
     parser.add_argument(
@@ -111,11 +116,26 @@ def main():
     # Parse arguments
     args = parser.parse_args()
     
-    # Validate input file exists
+    # Handle input file - create default if needed
     input_path = Path(args.input_file)
     if not input_path.exists():
-        print(f"Error: Input file '{args.input_file}' not found.")
-        sys.exit(1)
+        if args.input_file == "artifacts/initial_state.npy":  # Using default
+            print(f"Default initial state not found. Creating it...")
+            # Import the scene creation function
+            from scripts.create_default_scene import create_default_scene
+            
+            # Create artifacts directory if needed
+            artifacts_dir = Path("artifacts")
+            artifacts_dir.mkdir(exist_ok=True)
+            
+            # Generate and save default scene
+            initial_state = create_default_scene()
+            np.save(input_path, initial_state)
+            print(f"Created default initial state: {input_path}")
+            print(f"  Shape: {initial_state.shape}")
+        else:
+            print(f"Error: Input file '{args.input_file}' not found.")
+            sys.exit(1)
     
     # Determine if we need to collect trajectory
     collect_trajectory = not args.no_render
@@ -169,11 +189,21 @@ def main():
             
             print(f"\nRendering video to: {video_path}")
             
+            # Calculate video duration based on simulation
+            # Default physics timestep is 0.016s (60 Hz)
+            physics_timestep = 0.016  # TODO: Get this from the engine
+            if args.video_duration:
+                video_duration = args.video_duration
+            else:
+                # Auto-calculate duration: steps * timestep
+                video_duration = args.steps * physics_timestep
+                print(f"Video duration: {video_duration:.2f}s ({args.steps} steps × {physics_timestep}s)")
+            
             # Create renderer invoker
             renderer = RendererInvoker(
                 trajectory_path=tmp_trajectory_path,
                 video_output_path=str(video_path),
-                duration=args.video_duration,
+                duration=video_duration,
                 fps=args.video_fps
             )
             
