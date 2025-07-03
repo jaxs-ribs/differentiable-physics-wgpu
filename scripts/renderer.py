@@ -1,65 +1,13 @@
-#!/usr/bin/env python3
-"""Renderer invocation module for the physics engine.
-
-This module provides clean interfaces for video rendering from simulation trajectories.
-Follows Single Responsibility Principle - handles only rendering concerns.
-"""
 import subprocess
-import sys
-from pathlib import Path
-from typing import Optional, List, Tuple
 import numpy as np
-from dataclasses import dataclass
-from enum import Enum
+from pathlib import Path
 
 
-class RenderMode(Enum):
-    """Rendering backend modes."""
-    GPU = "gpu"
-    ORACLE = "oracle"
-
-
-@dataclass
-class RenderCommand:
-    """Encapsulates a render command configuration."""
-    renderer_path: Path
-    trajectory_path: Path
-    video_output_path: Path
-    mode: RenderMode
-    duration: float
-    fps: int
+class RendererInvoker:
+    def __init__(self):
+        self.renderer_path = self._find_renderer()
     
-    def to_args(self) -> List[str]:
-        """Convert configuration to command-line arguments."""
-        args = [str(self.renderer_path)]
-        
-        # Add simulation file with appropriate flag
-        mode_flag = f"--{self.mode.value}"
-        args.extend([mode_flag, str(self.trajectory_path)])
-        
-        # Add video recording parameters
-        args.extend([
-            "--record", str(self.video_output_path),
-            "--duration", str(self.duration),
-            "--fps", str(self.fps)
-        ])
-        
-        return args
-
-
-class RendererLocator:
-    """Handles locating the renderer executable."""
-    
-    @staticmethod
-    def find_renderer() -> Path:
-        """Locate the renderer executable.
-        
-        Returns:
-            Path to the renderer executable
-            
-        Raises:
-            RuntimeError: If renderer not found
-        """
+    def _find_renderer(self) -> Path:
         physics_core_dir = Path(__file__).parent.parent
         renderer_path = physics_core_dir / "renderer" / "target" / "release" / "renderer"
         
@@ -70,182 +18,70 @@ class RendererLocator:
             )
         
         return renderer_path
-
-
-class TrajectoryFormatter:
-    """Handles trajectory format conversion for the renderer."""
     
-    # Renderer expects 18 properties per body
-    RENDERER_PROPS_PER_BODY = 18
-    
-    # Property indices in physics engine format
-    POSITION_INDICES = slice(0, 3)
-    VELOCITY_INDICES = slice(3, 6)
-    ORIENTATION_INDICES = slice(6, 10)
-    ANGULAR_VELOCITY_INDICES = slice(10, 13)
-    INV_MASS_INDEX = 13
-    SHAPE_TYPE_INDEX = 23
-    SHAPE_PARAMS_INDICES = slice(24, 27)
-    
-    @classmethod
-    def format_for_renderer(cls, trajectory: np.ndarray) -> np.ndarray:
-        """Convert physics engine trajectory format to renderer format.
+    def render_video(self, trajectory_path: Path, output_path: Path, 
+                    duration: float, fps: int = 30, verbose: bool = False) -> bool:
+        # Load and format trajectory for renderer
+        trajectory = np.load(trajectory_path)
+        formatted_trajectory = self._format_for_renderer(trajectory)
         
-        Args:
-            trajectory: Physics engine trajectory of shape (frames, bodies, 27)
-            
-        Returns:
-            Formatted trajectory of shape (frames, bodies * 18)
-        """
-        frames, num_bodies, _ = trajectory.shape
+        # Save formatted trajectory to temp file
+        temp_trajectory_path = trajectory_path.with_suffix('.formatted.npy')
+        np.save(temp_trajectory_path, formatted_trajectory)
         
-        # Create output array
-        renderer_data = np.zeros(
-            (frames, num_bodies, cls.RENDERER_PROPS_PER_BODY), 
-            dtype=np.float32
-        )
-        
-        # Map properties
-        cls._map_kinematics(trajectory, renderer_data)
-        cls._map_mass(trajectory, renderer_data)
-        cls._map_shape(trajectory, renderer_data)
-        
-        # Reshape to expected format
-        return renderer_data.reshape(frames, num_bodies * cls.RENDERER_PROPS_PER_BODY)
-    
-    @classmethod
-    def _map_kinematics(cls, source: np.ndarray, target: np.ndarray) -> None:
-        """Map kinematic properties (position, velocity, orientation, angular velocity)."""
-        target[:, :, 0:3] = source[:, :, cls.POSITION_INDICES]
-        target[:, :, 3:6] = source[:, :, cls.VELOCITY_INDICES]
-        target[:, :, 6:10] = source[:, :, cls.ORIENTATION_INDICES]
-        target[:, :, 10:13] = source[:, :, cls.ANGULAR_VELOCITY_INDICES]
-    
-    @classmethod
-    def _map_mass(cls, source: np.ndarray, target: np.ndarray) -> None:
-        """Convert inverse mass to mass, handling infinite mass bodies."""
-        inv_mass = source[:, :, cls.INV_MASS_INDEX]
-        with np.errstate(divide='ignore'):
-            mass = np.where(inv_mass > 0, 1.0 / inv_mass, 1e9)
-        target[:, :, 13] = mass
-    
-    @classmethod
-    def _map_shape(cls, source: np.ndarray, target: np.ndarray) -> None:
-        """Map shape type and parameters."""
-        target[:, :, 14] = source[:, :, cls.SHAPE_TYPE_INDEX]
-        target[:, :, 15:18] = source[:, :, cls.SHAPE_PARAMS_INDICES]
-
-
-class RendererInvoker:
-    """Manages the external renderer subprocess for video generation."""
-    
-    def __init__(self, trajectory_path: str, video_output_path: str,
-                 duration: float = 5.0, fps: int = 60):
-        """Initialize the renderer invoker.
-        
-        Args:
-            trajectory_path: Path to the trajectory .npy file
-            video_output_path: Path for the output video file
-            duration: Video duration in seconds (default: 5.0)
-            fps: Frames per second for the video (default: 60)
-        """
-        self.trajectory_path = Path(trajectory_path)
-        self.video_output_path = Path(video_output_path)
-        self.duration = duration
-        self.fps = fps
-        
-        # Locate renderer executable
-        self.renderer_path = RendererLocator.find_renderer()
-        
-    def render(self, use_gpu_flag: bool = False, verbose: bool = True) -> bool:
-        """Execute the renderer to create a video.
-        
-        Args:
-            use_gpu_flag: If True, use GPU backend; otherwise use Oracle backend
-            verbose: Whether to print renderer output
-            
-        Returns:
-            True if rendering succeeded, False otherwise
-        """
-        # Create render command
-        command = self._create_render_command(use_gpu_flag)
-        
-        # Execute rendering
-        return self._execute_render_command(command, verbose)
-    
-    def _create_render_command(self, use_gpu_flag: bool) -> RenderCommand:
-        """Create render command configuration."""
-        mode = RenderMode.GPU if use_gpu_flag else RenderMode.ORACLE
-        
-        return RenderCommand(
-            renderer_path=self.renderer_path,
-            trajectory_path=self.trajectory_path,
-            video_output_path=self.video_output_path,
-            mode=mode,
-            duration=self.duration,
-            fps=self.fps
-        )
-    
-    def _execute_render_command(self, command: RenderCommand, verbose: bool) -> bool:
-        """Execute the render command and handle results."""
-        cmd_args = command.to_args()
+        # Build command
+        cmd = [
+            str(self.renderer_path),
+            str(temp_trajectory_path),
+            str(output_path),
+            "--duration", str(duration),
+            "--fps", str(fps),
+            "--mode", "oracle"  # Use oracle backend by default
+        ]
         
         if verbose:
-            self._print_launch_message(cmd_args)
+            print(f"Executing: {' '.join(cmd)}")
         
         try:
-            result = self._run_subprocess(cmd_args)
-            self._handle_subprocess_output(result, verbose)
-            
-            if result.returncode != 0:
-                self._print_error(f"Renderer failed with exit code {result.returncode}")
-                return False
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             
             if verbose:
-                print(f"Video saved to: {self.video_output_path}")
+                if result.stdout:
+                    print("Renderer output:", result.stdout)
+                if result.stderr:
+                    print("Renderer errors:", result.stderr)
             
-            return True
+            success = result.returncode == 0
             
-        except subprocess.SubprocessError as e:
-            self._print_error(f"Failed to run renderer: {e}")
+            # Clean up temp file
+            try:
+                temp_trajectory_path.unlink()
+            except:
+                pass
+            
+            return success
+            
+        except subprocess.TimeoutExpired:
+            print("Renderer timed out after 5 minutes")
+            return False
+        except Exception as e:
+            print(f"Renderer execution failed: {e}")
             return False
     
-    def _run_subprocess(self, cmd_args: List[str]) -> subprocess.CompletedProcess:
-        """Run the renderer subprocess."""
-        return subprocess.run(
-            cmd_args,
-            capture_output=True,
-            text=True,
-            check=False
-        )
-    
-    def _handle_subprocess_output(self, result: subprocess.CompletedProcess, 
-                                  verbose: bool) -> None:
-        """Handle subprocess stdout and stderr."""
-        if verbose and result.stdout:
-            print("Renderer output:")
-            print(result.stdout)
+    def _format_for_renderer(self, trajectory: np.ndarray) -> np.ndarray:
+        frames, bodies, _ = trajectory.shape
         
-        if result.stderr:
-            self._print_error("Renderer errors:")
-            self._print_error(result.stderr)
-    
-    def _print_launch_message(self, cmd_args: List[str]) -> None:
-        """Print the launch command."""
-        print(f"Launching renderer: {' '.join(cmd_args)}")
-    
-    def _print_error(self, message: str) -> None:
-        """Print error message to stderr."""
-        print(message, file=sys.stderr)
-    
-    @staticmethod
-    def format_trajectory_for_renderer(trajectory: np.ndarray) -> np.ndarray:
-        """Convert physics engine trajectory format to renderer format.
+        # Extract the 18 properties the renderer expects per body
+        formatted = np.zeros((frames, bodies, 18), dtype=np.float32)
         
-        Args:
-            trajectory: Physics engine trajectory of shape (frames, bodies, 27)
-            
-        Returns:
-            Formatted trajectory of shape (frames, bodies * 18)
-        """
-        return TrajectoryFormatter.format_for_renderer(trajectory)
+        # Copy relevant properties (positions, velocities, orientation, etc.)
+        formatted[:, :, 0:3] = trajectory[:, :, 0:3]    # position
+        formatted[:, :, 3:6] = trajectory[:, :, 3:6]    # velocity  
+        formatted[:, :, 6:10] = trajectory[:, :, 6:10]  # quaternion
+        formatted[:, :, 10:13] = trajectory[:, :, 10:13] # angular velocity
+        formatted[:, :, 13] = trajectory[:, :, 13]       # inv_mass
+        formatted[:, :, 14] = trajectory[:, :, 23]       # shape_type
+        formatted[:, :, 15:18] = trajectory[:, :, 24:27] # shape_params
+        
+        # Flatten to (frames, bodies * 18)
+        return formatted.reshape(frames, -1)

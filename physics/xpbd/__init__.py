@@ -1,0 +1,1 @@
+"""Extended Position-Based Dynamics (XPBD) physics engine implementation."""

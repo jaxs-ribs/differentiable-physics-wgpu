@@ -5,7 +5,7 @@ Provides reusable scenes and test data for unit and integration tests.
 import pytest
 import numpy as np
 from physics.engine import TensorPhysicsEngine
-from physics.types import BodySchema, ShapeType, create_body_array
+from physics.types import ShapeType, create_body_array
 
 @pytest.fixture
 def two_body_scene():

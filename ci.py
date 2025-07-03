@@ -111,54 +111,28 @@ def run_tests(test_type, test_path, quick_mode=False):
     return success
 
 def main():
-    parser = argparse.ArgumentParser(description="Physics Engine CI Test Runner")
+    parser = argparse.ArgumentParser(description="XPBD Physics Engine Test Runner")
     parser.add_argument('--unit', action='store_true', help='Run only unit tests')
-    parser.add_argument('--integration', action='store_true', help='Run only integration tests')
-    parser.add_argument('--benchmarks', action='store_true', help='Run benchmark tests')
-    parser.add_argument('--debug', action='store_true', help='Run debugging tests')
-    parser.add_argument('--all', action='store_true', help='Run all tests including benchmarks')
     parser.add_argument('--quick', action='store_true', help='Run minimal test set')
     
     args = parser.parse_args()
     
-    # Determine what to run
     run_unit = True
-    run_integration = True
-    run_benchmarks = args.benchmarks or args.all
-    run_debug = args.debug
+    run_basic = True
     
     if args.unit:
-        run_integration = False
-        run_benchmarks = False
-        # Keep debug if explicitly requested
-        run_debug = args.debug
-    elif args.integration:
-        run_unit = False
-        run_benchmarks = False
-        run_debug = False
-    elif args.debug:
-        # If only debug flag, don't run other tests by default
-        run_unit = False
-        run_integration = False
-        run_benchmarks = False
-        run_debug = True
+        run_basic = False
     
-    # Print header
-    print_header("Physics Engine Test Suite")
+    print_header("XPBD Physics Engine Test Suite")
     
     if args.quick:
-        print(f"{YELLOW}Running in QUICK mode - minimal tests only{RESET}")
+        print(f"{YELLOW}Running in QUICK mode{RESET}")
     
-    # Check if we're in the right directory
+    # Check directory
     if not os.path.exists("physics") or not os.path.exists("tests"):
         print(f"{RED}Error: Must run from physics_core directory{RESET}")
-        print(f"Current directory: {os.getcwd()}")
         return 1
     
-    if os.environ.get('CI') == 'true':
-        print(f"{GREEN}CI environment detected{RESET}")
-    
-    # Track results
     all_passed = True
     start_time = time.time()
     
@@ -167,22 +141,9 @@ def main():
         if not run_tests("Unit", "tests/unit", args.quick):
             all_passed = False
     
-    if run_integration:
-        if not run_tests("Integration", "tests/integration", args.quick):
+    if run_basic:
+        if not run_tests("XPBD Basic", "tests/test_xpbd_basic.py", args.quick):
             all_passed = False
-    
-    if run_benchmarks:
-        if not run_tests("Benchmark", "tests/benchmarks", args.quick):
-            all_passed = False
-    
-    if run_debug:
-        print_header("Running Debug Tests")
-        print(f"{YELLOW}Warning: Debug tests are diagnostic tools, not regression tests{RESET}")
-        print("They may fail or behave unexpectedly - this is normal\n")
-        
-        # Run debug tests but don't fail CI on their results
-        run_tests("Debug", "tests/debugging", args.quick)
-        print(f"\n{BLUE}Debug tests completed (results not counted in CI pass/fail){RESET}")
     
     # Summary
     total_time = time.time() - start_time
