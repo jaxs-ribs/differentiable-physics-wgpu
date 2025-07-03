@@ -1,29 +1,5 @@
 #!/usr/bin/env python3
-"""Simple CI test dispatcher for the physics engine.
-
-Basic Usage:
-    python ci.py              # Run unit + integration tests (default)
-    python ci.py --unit       # Run only unit tests
-    python ci.py --integration # Run only integration tests  
-    python ci.py --benchmarks # Run benchmarks
-    python ci.py --debug      # Run debugging tests
-    python ci.py --all        # Run everything including benchmarks
-    python ci.py --quick      # Run minimal test set for quick feedback
-
-Examples:
-    python ci.py                    # Standard test suite before commit
-    python ci.py --quick            # Quick smoke test during development
-    python ci.py --unit --debug     # Run unit tests + debugging tools
-    python ci.py --all              # Full test suite before merge
-    python ci.py --integration -v   # Verbose integration tests only
-    
-Common Workflows:
-    During development:  python ci.py --quick
-    Before commit:       python ci.py
-    Before merge:        python ci.py --all
-    Debug an issue:      python ci.py --debug
-    Performance check:   python ci.py --benchmarks
-"""
+"""Simple CI test runner for XPBD physics engine."""
 import sys
 import os
 import argparse
@@ -35,46 +11,26 @@ from pathlib import Path
 physics_core_path = os.path.dirname(os.path.abspath(__file__))
 tinygrad_path = os.path.join(physics_core_path, "external", "tinygrad")
 
-# Add to Python path
 if physics_core_path not in sys.path:
     sys.path.insert(0, physics_core_path)
 if os.path.exists(tinygrad_path) and tinygrad_path not in sys.path:
     sys.path.insert(0, tinygrad_path)
 
-# Colors for output
+# Colors
 GREEN = '\033[92m'
 RED = '\033[91m'
 YELLOW = '\033[93m'
 BLUE = '\033[94m'
 RESET = '\033[0m'
 
-def print_header(text):
-    """Print a section header."""
-    print(f"\n{BLUE}{'='*60}{RESET}")
-    print(f"{BLUE}{text:^60}{RESET}")
-    print(f"{BLUE}{'='*60}{RESET}\n")
-
-def print_success(text):
-    """Print success message."""
-    print(f"{GREEN}✓ {text}{RESET}")
-
-def print_error(text):
-    """Print error message."""
-    print(f"{RED}✗ {text}{RESET}")
 
 def run_pytest(test_path, args=""):
     """Run pytest on a directory or file."""
-    # Use 'python' in conda, 'python3' otherwise
     python_cmd = "python" if os.environ.get("CONDA_DEFAULT_ENV") else "python3"
     cmd = f"{python_cmd} -m pytest {args} {test_path}"
-    print(f"Running: {cmd}")
     
-    # Set up environment with proper paths
+    # Set up environment
     env = os.environ.copy()
-    physics_core_path = os.path.dirname(os.path.abspath(__file__))
-    tinygrad_path = os.path.join(physics_core_path, "external", "tinygrad")
-    
-    # Add to PYTHONPATH
     python_path = env.get('PYTHONPATH', '')
     paths_to_add = [physics_core_path, tinygrad_path]
     for path in paths_to_add:
@@ -88,45 +44,36 @@ def run_pytest(test_path, args=""):
     
     return result.returncode == 0, elapsed
 
-def run_tests(test_type, test_path, quick_mode=False):
+
+def run_tests(test_name, test_path, quick_mode=False):
     """Run a set of tests and report results."""
-    print_header(f"Running {test_type} Tests")
+    print(f"\n{BLUE}Running {test_name} Tests{RESET}")
     
-    # Use appropriate pytest args
-    args = "-v -x"  # verbose, stop on first failure
-    if os.environ.get('CI') == 'true':
-        args += " --tb=short"  # shorter traceback in CI
-    
-    if quick_mode and test_type == "Integration":
-        # In quick mode, skip slow tests
-        args += " -k 'not slow'"
+    args = "-v"
+    if quick_mode:
+        args += " -x"  # Stop on first failure in quick mode
     
     success, elapsed = run_pytest(test_path, args)
     
     if success:
-        print_success(f"{test_type} tests passed ({elapsed:.1f}s)")
+        print(f"{GREEN}✓ {test_name} tests passed ({elapsed:.1f}s){RESET}")
     else:
-        print_error(f"{test_type} tests failed ({elapsed:.1f}s)")
+        print(f"{RED}✗ {test_name} tests failed ({elapsed:.1f}s){RESET}")
     
     return success
+
 
 def main():
     parser = argparse.ArgumentParser(description="XPBD Physics Engine Test Runner")
     parser.add_argument('--unit', action='store_true', help='Run only unit tests')
-    parser.add_argument('--quick', action='store_true', help='Run minimal test set')
+    parser.add_argument('--quick', action='store_true', help='Stop on first failure')
     
     args = parser.parse_args()
     
-    run_unit = True
-    run_basic = True
-    
-    if args.unit:
-        run_basic = False
-    
-    print_header("XPBD Physics Engine Test Suite")
+    print(f"{BLUE}XPBD Physics Engine Test Suite{RESET}")
     
     if args.quick:
-        print(f"{YELLOW}Running in QUICK mode{RESET}")
+        print(f"{YELLOW}Quick mode: stopping on first failure{RESET}")
     
     # Check directory
     if not os.path.exists("physics") or not os.path.exists("tests"):
@@ -136,26 +83,27 @@ def main():
     all_passed = True
     start_time = time.time()
     
-    # Run tests
-    if run_unit:
-        if not run_tests("Unit", "tests/unit", args.quick):
-            all_passed = False
+    # Run XPBD unit tests
+    if not run_tests("XPBD Unit", "tests/unit/xpbd", args.quick):
+        all_passed = False
     
-    if run_basic:
+    # Run basic XPBD integration tests (unless unit-only)
+    if not args.unit:
         if not run_tests("XPBD Basic", "tests/test_xpbd_basic.py", args.quick):
             all_passed = False
     
     # Summary
     total_time = time.time() - start_time
-    print_header("Test Summary")
+    print(f"\n{BLUE}Summary{RESET}")
     print(f"Total time: {total_time:.1f}s")
     
     if all_passed:
-        print_success("All tests passed!")
+        print(f"{GREEN}✓ All tests passed!{RESET}")
         return 0
     else:
-        print_error("Some tests failed!")
+        print(f"{RED}✗ Some tests failed!{RESET}")
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())
