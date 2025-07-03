@@ -2,18 +2,8 @@ from enum import IntEnum
 import numpy as np
 from typing import NamedTuple
 
-class BodySchema:
-  POS_X, POS_Y, POS_Z = 0, 1, 2
-  VEL_X, VEL_Y, VEL_Z = 3, 4, 5
-  QUAT_W, QUAT_X, QUAT_Y, QUAT_Z = 6, 7, 8, 9
-  ANG_VEL_X, ANG_VEL_Y, ANG_VEL_Z = 10, 11, 12
-  INV_MASS = 13
-  INV_INERTIA_XX, INV_INERTIA_XY, INV_INERTIA_XZ = 14, 15, 16
-  INV_INERTIA_YX, INV_INERTIA_YY, INV_INERTIA_YZ = 17, 18, 19
-  INV_INERTIA_ZX, INV_INERTIA_ZY, INV_INERTIA_ZZ = 20, 21, 22
-  SHAPE_TYPE = 23
-  SHAPE_PARAM_1, SHAPE_PARAM_2, SHAPE_PARAM_3 = 24, 25, 26
-  NUM_PROPERTIES = 27
+class ExecutionMode(IntEnum):
+    ORACLE = 0
 
 class ShapeType(IntEnum):
   """Supported collision shapes."""
@@ -27,43 +17,52 @@ class Contact(NamedTuple):
   depth: float
   point: np.ndarray
 
-def create_body_array(position: np.ndarray, velocity: np.ndarray, orientation: np.ndarray, 
-                      angular_vel: np.ndarray, mass: float, inertia: np.ndarray, 
-                      shape_type: ShapeType, shape_params: np.ndarray) -> np.ndarray:
-  body = np.zeros(BodySchema.NUM_PROPERTIES, dtype=np.float32)
-  body[BodySchema.POS_X:BodySchema.POS_Z+1] = position
-  body[BodySchema.VEL_X:BodySchema.VEL_Z+1] = velocity
-  body[BodySchema.QUAT_W:BodySchema.QUAT_Z+1] = orientation
-  body[BodySchema.ANG_VEL_X:BodySchema.ANG_VEL_Z+1] = angular_vel
-  body[BodySchema.INV_MASS] = 1.0 / mass if mass < 1e7 else 0.0
-  body[BodySchema.INV_INERTIA_XX:BodySchema.INV_INERTIA_ZZ+1] = np.linalg.inv(inertia).flatten()
-  body[BodySchema.SHAPE_TYPE] = shape_type.value
-  body[BodySchema.SHAPE_PARAM_1:BodySchema.SHAPE_PARAM_3+1] = shape_params
-  return body
-
-def create_body_array_defaults(position: np.ndarray, mass: float, shape_type: ShapeType, 
-                               shape_params: np.ndarray, velocity: np.ndarray | None = None, 
-                               orientation: np.ndarray | None = None, angular_vel: np.ndarray | None = None) -> np.ndarray:
-    if velocity is None:
-        velocity = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-    if orientation is None:
-        orientation = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32) # Identity quaternion
-    if angular_vel is None:
-        angular_vel = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+def create_soa_body_data(positions: list[np.ndarray], velocities: list[np.ndarray], 
+                         orientations: list[np.ndarray], angular_vels: list[np.ndarray],
+                         masses: list[float], shape_types: list[ShapeType], 
+                         shape_params: list[np.ndarray]) -> dict[str, np.ndarray]:
+    """Create SoA body data from lists of individual body properties."""
+    n_bodies = len(positions)
     
-    # Simple inertia for sphere/box for now
-    if shape_type == ShapeType.SPHERE:
-        radius = shape_params[0]
-        inertia_val = 2/5 * mass * radius**2
-        inertia = np.diag([inertia_val, inertia_val, inertia_val])
-    elif shape_type == ShapeType.BOX:
-        half_extents = shape_params
-        lx, ly, lz = 2*half_extents # Full lengths
-        inertia_xx = (1/12) * mass * (ly**2 + lz**2)
-        inertia_yy = (1/12) * mass * (lx**2 + lz**2)
-        inertia_zz = (1/12) * mass * (lx**2 + ly**2)
-        inertia = np.diag([inertia_xx, inertia_yy, inertia_zz])
-    else:
-        inertia = np.diag([1.0, 1.0, 1.0]) # Placeholder
+    # Stack into SoA format
+    x = np.stack(positions, axis=0)  # (N, 3)
+    v = np.stack(velocities, axis=0)  # (N, 3)
+    q = np.stack(orientations, axis=0)  # (N, 4)
+    omega = np.stack(angular_vels, axis=0)  # (N, 3)
+    
+    # Convert masses to inv_mass
+    inv_mass = np.array([1.0 / m if m < 1e7 else 0.0 for m in masses], dtype=np.float32)
+    
+    # Compute inertia tensors and convert to inv_inertia
+    inv_inertia = np.zeros((n_bodies, 3, 3), dtype=np.float32)
+    for i, (mass, shape_type, params) in enumerate(zip(masses, shape_types, shape_params)):
+        if shape_type == ShapeType.SPHERE:
+            radius = params[0]
+            inertia_val = 2/5 * mass * radius**2
+            inertia = np.diag([inertia_val, inertia_val, inertia_val])
+        elif shape_type == ShapeType.BOX:
+            half_extents = params
+            lx, ly, lz = 2*half_extents
+            inertia_xx = (1/12) * mass * (ly**2 + lz**2)
+            inertia_yy = (1/12) * mass * (lx**2 + lz**2)
+            inertia_zz = (1/12) * mass * (lx**2 + ly**2)
+            inertia = np.diag([inertia_xx, inertia_yy, inertia_zz])
+        else:
+            inertia = np.diag([1.0, 1.0, 1.0])
         
-    return create_body_array(position, velocity, orientation, angular_vel, mass, inertia, shape_type, shape_params)
+        inv_inertia[i] = np.linalg.inv(inertia)
+    
+    # Shape data
+    shape_type_array = np.array([st.value for st in shape_types], dtype=np.int32)
+    shape_param_array = np.stack(shape_params, axis=0)  # (N, 3)
+    
+    return {
+        'x': x,
+        'v': v, 
+        'q': q,
+        'omega': omega,
+        'inv_mass': inv_mass,
+        'inv_inertia': inv_inertia,
+        'shape_type': shape_type_array,
+        'shape_params': shape_param_array
+    }

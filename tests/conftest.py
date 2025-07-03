@@ -5,7 +5,8 @@ Provides reusable scenes and test data for unit and integration tests.
 import pytest
 import numpy as np
 from physics.engine import TensorPhysicsEngine
-from physics.types import ShapeType, create_body_array
+from physics.types import ShapeType
+from scripts.scene_builder import SceneBuilder
 
 @pytest.fixture
 def two_body_scene():
@@ -16,36 +17,37 @@ def two_body_scene():
     - Body 0: Sphere at origin, radius 1, moving right
     - Body 1: Box at (3, 0, 0), stationary
   """
-  bodies_list = []
+  builder = SceneBuilder()
   
-  # Sphere moving right
-  sphere = create_body_array(
-    position=np.array([0, 0, 0], dtype=np.float32),
-    velocity=np.array([2, 0, 0], dtype=np.float32),  # moving right
-    orientation=np.array([1, 0, 0, 0], dtype=np.float32),
-    angular_vel=np.array([0, 0, 0], dtype=np.float32),
+  # Sphere at origin, moving right
+  builder.add_body(
+    position=[0, 0, 0],
+    velocity=[2, 0, 0],  # Moving right
     mass=1.0,
-    inertia=np.eye(3, dtype=np.float32) * 2/5,  # sphere inertia
     shape_type=ShapeType.SPHERE,
-    shape_params=np.array([1.0, 0, 0], dtype=np.float32)
+    shape_params=[1.0, 0, 0]  # Radius = 1
   )
-  bodies_list.append(sphere)
   
   # Stationary box
-  box = create_body_array(
-    position=np.array([3, 0, 0], dtype=np.float32),
-    velocity=np.array([0, 0, 0], dtype=np.float32),
-    orientation=np.array([1, 0, 0, 0], dtype=np.float32),
-    angular_vel=np.array([0, 0, 0], dtype=np.float32),
+  builder.add_body(
+    position=[3, 0, 0],
     mass=2.0,
-    inertia=np.eye(3, dtype=np.float32) * 2/3,  # box inertia
     shape_type=ShapeType.BOX,
-    shape_params=np.array([1.0, 1.0, 1.0], dtype=np.float32)
+    shape_params=[1.0, 1.0, 1.0]  # Unit cube
   )
-  bodies_list.append(box)
   
-  bodies = np.stack(bodies_list)
-  engine = TensorPhysicsEngine(bodies, gravity=np.array([0, -9.81, 0], dtype=np.float32))
+  soa_data = builder.build()
+  engine = TensorPhysicsEngine(
+    x=soa_data['x'],
+    q=soa_data['q'],
+    v=soa_data['v'],
+    omega=soa_data['omega'],
+    inv_mass=soa_data['inv_mass'],
+    inv_inertia=soa_data['inv_inertia'],
+    shape_type=soa_data['shape_type'],
+    shape_params=soa_data['shape_params'],
+    gravity=np.array([0, -9.81, 0], dtype=np.float32)
+  )
   return engine
 
 @pytest.fixture
@@ -55,40 +57,40 @@ def multi_body_stack_scene():
   Returns:
     TensorPhysicsEngine with ground + 5 boxes stacked vertically
   """
-  bodies_list = []
+  builder = SceneBuilder()
   
-  # Add ground plane
-  ground = create_body_array(
-    position=np.array([0, -2, 0], dtype=np.float32),
-    velocity=np.array([0, 0, 0], dtype=np.float32),
-    orientation=np.array([1, 0, 0, 0], dtype=np.float32),
-    angular_vel=np.array([0, 0, 0], dtype=np.float32),
+  # Ground plane
+  builder.add_body(
+    position=[0, -2, 0],
     mass=1e8,  # Static
-    inertia=np.eye(3, dtype=np.float32) * 1e8,
     shape_type=ShapeType.BOX,
-    shape_params=np.array([10.0, 0.5, 10.0], dtype=np.float32)
+    shape_params=[10.0, 0.5, 10.0]  # Large flat ground
   )
-  bodies_list.append(ground)
   
   # Stack of boxes
   box_size = 1.0
   for i in range(5):
     y_pos = i * (box_size * 2 + 0.1) + 0.5  # Start above ground
-    box = create_body_array(
-      position=np.array([0, y_pos, 0], dtype=np.float32),
-      velocity=np.array([0, 0, 0], dtype=np.float32),
-      orientation=np.array([1, 0, 0, 0], dtype=np.float32),
-      angular_vel=np.array([0, 0, 0], dtype=np.float32),
+    builder.add_body(
+      position=[0, y_pos, 0],
       mass=1.0,
-      inertia=np.eye(3, dtype=np.float32) * 1/3,
       shape_type=ShapeType.BOX,
-      shape_params=np.array([box_size, box_size, box_size], dtype=np.float32)
+      shape_params=[box_size, box_size, box_size]
     )
-    bodies_list.append(box)
   
-  bodies = np.stack(bodies_list)
-  # Use lower restitution to help with stability
-  engine = TensorPhysicsEngine(bodies, gravity=np.array([0, -9.81, 0], dtype=np.float32), restitution=0.1)
+  soa_data = builder.build()
+  engine = TensorPhysicsEngine(
+    x=soa_data['x'],
+    q=soa_data['q'],
+    v=soa_data['v'],
+    omega=soa_data['omega'],
+    inv_mass=soa_data['inv_mass'],
+    inv_inertia=soa_data['inv_inertia'],
+    shape_type=soa_data['shape_type'],
+    shape_params=soa_data['shape_params'],
+    gravity=np.array([0, -9.81, 0], dtype=np.float32),
+    restitution=0.1
+  )
   return engine
 
 @pytest.fixture
@@ -99,7 +101,7 @@ def random_bodies_scene():
     TensorPhysicsEngine with 20 mixed spheres and boxes
   """
   np.random.seed(42)  # for reproducible tests
-  bodies_list = []
+  builder = SceneBuilder()
   
   for i in range(20):
     # Random position in a 10x10x10 volume
@@ -116,33 +118,38 @@ def random_bodies_scene():
     if i % 2 == 0:
       # Sphere
       radius = np.random.uniform(0.5, 1.5)
-      body = create_body_array(
+      mass = radius**3 * 4/3 * np.pi  # proportional to volume
+      builder.add_body(
         position=position,
         velocity=velocity,
         orientation=quat,
-        angular_vel=np.array([0, 0, 0], dtype=np.float32),
-        mass=radius**3 * 4/3 * np.pi,  # proportional to volume
-        inertia=np.eye(3, dtype=np.float32) * 2/5 * radius**2,
+        mass=mass,
         shape_type=ShapeType.SPHERE,
-        shape_params=np.array([radius, 0, 0], dtype=np.float32)
+        shape_params=[radius, 0, 0]
       )
     else:
       # Box
       half_extents = np.random.uniform(0.5, 1.5, 3).astype(np.float32)
       volume = 8 * np.prod(half_extents)
-      body = create_body_array(
+      builder.add_body(
         position=position,
         velocity=velocity,
         orientation=quat,
-        angular_vel=np.array([0, 0, 0], dtype=np.float32),
         mass=volume,
-        inertia=np.diag(half_extents**2 * volume / 3).astype(np.float32),
         shape_type=ShapeType.BOX,
         shape_params=half_extents
       )
-    
-    bodies_list.append(body)
   
-  bodies = np.stack(bodies_list)
-  engine = TensorPhysicsEngine(bodies, gravity=np.array([0, -9.81, 0], dtype=np.float32))
+  soa_data = builder.build()
+  engine = TensorPhysicsEngine(
+    x=soa_data['x'],
+    q=soa_data['q'],
+    v=soa_data['v'],
+    omega=soa_data['omega'],
+    inv_mass=soa_data['inv_mass'],
+    inv_inertia=soa_data['inv_inertia'],
+    shape_type=soa_data['shape_type'],
+    shape_params=soa_data['shape_params'],
+    gravity=np.array([0, -9.81, 0], dtype=np.float32)
+  )
   return engine

@@ -1,4 +1,4 @@
-from .types import BodySchema, ShapeType, create_body_array, create_body_array_defaults
+from .types import ExecutionMode, ShapeType, create_soa_body_data
 from .engine import TensorPhysicsEngine
 
-__all__ = ['BodySchema', 'ShapeType', 'create_body_array', 'create_body_array_defaults', 'TensorPhysicsEngine']
+__all__ = ['ExecutionMode', 'ShapeType', 'create_soa_body_data', 'TensorPhysicsEngine']

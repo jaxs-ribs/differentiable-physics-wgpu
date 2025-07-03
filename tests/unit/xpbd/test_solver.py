@@ -7,17 +7,17 @@ from physics.xpbd.solver import solve_constraints
 
 def test_solve_constraints_placeholder():
     """Test that solve_constraints function exists and can be called."""
-    # Create dummy inputs
-    bodies = Tensor.zeros(5, 27)
-    constraints = Tensor.zeros(10, 8)  # 10 constraints with 8 parameters each
+    # Create dummy SoA inputs
+    x = Tensor.zeros(5, 3)  # 5 bodies, 3D positions
+    q = Tensor.zeros(5, 4)  # 5 bodies, quaternions
+    contacts = Tensor.zeros(10, 10)  # 10 contacts with contact data
+    inv_mass = Tensor.zeros(5)  # 5 inverse masses
+    inv_inertia = Tensor.zeros(5, 3, 3)  # 5 inverse inertia tensors
     
-    try:
-        result = solve_constraints(bodies, constraints, iterations=8)
-        # Should return None from pass statement
-        assert result is None
-    except Exception as e:
-        # Expected - function is not implemented yet
-        assert "TODO" in str(e) or "NotImplementedError" in str(e)
+    x_result, q_result = solve_constraints(x, q, contacts, inv_mass, inv_inertia, iterations=8)
+    # Should return same positions and orientations (placeholder)
+    assert x_result.shape == x.shape
+    assert q_result.shape == q.shape
 
 
 def test_solve_constraints_signature():
@@ -25,10 +25,13 @@ def test_solve_constraints_signature():
     import inspect
     sig = inspect.signature(solve_constraints)
     
-    # Should have three parameters: bodies, constraints, iterations
-    assert len(sig.parameters) == 3
-    assert 'bodies' in sig.parameters
-    assert 'constraints' in sig.parameters
+    # Should have six parameters
+    assert len(sig.parameters) == 6
+    assert 'x' in sig.parameters
+    assert 'q' in sig.parameters
+    assert 'contacts' in sig.parameters
+    assert 'inv_mass' in sig.parameters
+    assert 'inv_inertia' in sig.parameters
     assert 'iterations' in sig.parameters
     
     # iterations should have default value
@@ -37,13 +40,13 @@ def test_solve_constraints_signature():
 
 def test_solve_constraints_default_iterations():
     """Test that default iterations parameter works."""
-    bodies = Tensor.zeros(3, 27)
-    constraints = Tensor.zeros(5, 8)
+    x = Tensor.zeros(3, 3)
+    q = Tensor.zeros(3, 4)
+    contacts = Tensor.zeros(5, 10)
+    inv_mass = Tensor.zeros(3)
+    inv_inertia = Tensor.zeros(3, 3, 3)
     
-    try:
-        # Should work with default iterations
-        result = solve_constraints(bodies, constraints)
-        assert result is None
-    except Exception as e:
-        # Expected - function is not implemented yet
-        assert "TODO" in str(e) or "NotImplementedError" in str(e)
+    # Should work with default iterations
+    x_result, q_result = solve_constraints(x, q, contacts, inv_mass, inv_inertia)
+    assert x_result.shape == x.shape
+    assert q_result.shape == q.shape

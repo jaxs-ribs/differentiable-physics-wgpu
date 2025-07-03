@@ -7,17 +7,16 @@ from physics.xpbd.narrowphase import generate_contacts
 
 def test_generate_contacts_placeholder():
     """Test that generate_contacts function exists and can be called."""
-    # Create dummy inputs
-    bodies = Tensor.zeros(5, 27)
+    # Create dummy SoA inputs
+    x = Tensor.zeros(5, 3)  # 5 bodies, 3D positions
+    q = Tensor.zeros(5, 4)  # 5 bodies, quaternions
     candidate_pairs = Tensor.zeros(10, 2)  # 10 potential pairs
+    shape_type = Tensor.zeros(5)  # 5 shape types
+    shape_params = Tensor.zeros(5, 3)  # 5 bodies, 3 shape parameters
     
-    try:
-        result = generate_contacts(bodies, candidate_pairs)
-        # Should return None from pass statement
-        assert result is None
-    except Exception as e:
-        # Expected - function is not implemented yet
-        assert "TODO" in str(e) or "NotImplementedError" in str(e)
+    result = generate_contacts(x, q, candidate_pairs, shape_type, shape_params)
+    # Should return empty contacts tensor
+    assert result.shape == (0, 10)
 
 
 def test_generate_contacts_signature():
@@ -25,7 +24,10 @@ def test_generate_contacts_signature():
     import inspect
     sig = inspect.signature(generate_contacts)
     
-    # Should have two parameters: bodies, candidate_pairs
-    assert len(sig.parameters) == 2
-    assert 'bodies' in sig.parameters
+    # Should have five parameters
+    assert len(sig.parameters) == 5
+    assert 'x' in sig.parameters
+    assert 'q' in sig.parameters
     assert 'candidate_pairs' in sig.parameters
+    assert 'shape_type' in sig.parameters
+    assert 'shape_params' in sig.parameters
