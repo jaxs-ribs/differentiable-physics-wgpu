@@ -13,8 +13,9 @@ def test_uniform_spatial_hash_placeholder():
     shape_params = Tensor.zeros(5, 3)  # 5 bodies, 3 shape parameters
     
     result = uniform_spatial_hash(x, shape_type, shape_params)
-    # Should return empty candidate pairs tensor
-    assert result.shape == (0, 2)
+    # Should return candidate pairs tensor (may include invalid -1,-1 pairs)
+    assert result.ndim == 2
+    assert result.shape[1] == 2
 
 
 def test_uniform_spatial_hash_signature():

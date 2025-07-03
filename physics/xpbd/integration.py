@@ -29,11 +29,3 @@ def predict_state(x: Tensor, q: Tensor, v: Tensor, omega: Tensor,
     
     return x_pred, q_pred, v_new, omega_new
 
-
-# Keep the old function for backwards compatibility temporarily
-def integrate(x: Tensor, q: Tensor, v: Tensor, omega: Tensor, inv_mass: Tensor, dt: float, gravity: Tensor) -> tuple[Tensor, Tensor]:
-    """Legacy integrate function - redirects to predict_state."""
-    # Create dummy inverse inertia for backwards compatibility
-    inv_inertia = Tensor.ones((x.shape[0], 3, 3))
-    x_pred, q_pred, _, _ = predict_state(x, q, v, omega, inv_mass, inv_inertia, gravity, dt)
-    return x_pred, q_pred

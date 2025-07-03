@@ -83,13 +83,15 @@ def main():
     all_passed = True
     start_time = time.time()
     
-    # Run XPBD unit tests
-    if not run_tests("XPBD Unit", "tests/unit/xpbd", args.quick):
+    # Run unit tests
+    if not run_tests("Unit", "tests/unit", args.quick):
         all_passed = False
     
-    # Run basic XPBD integration tests (unless unit-only)
+    # Run integration and scaffolding tests (unless unit-only)
     if not args.unit:
-        if not run_tests("XPBD Basic", "tests/test_xpbd_basic.py", args.quick):
+        if not run_tests("Integration", "tests/integration", args.quick):
+            all_passed = False
+        if not run_tests("Scaffolding", "tests/scaffolding", args.quick):
             all_passed = False
     
     # Summary
