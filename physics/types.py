@@ -6,9 +6,9 @@ class ExecutionMode(IntEnum):
     ORACLE = 0
 
 class ShapeType(IntEnum):
-  SPHERE = 0   # param_1: radius
-  BOX = 2      # param_1,2,3: half_extents x,y,z
-  CAPSULE = 3  # param_1: half-height, param_2: radius
+  SPHERE = 0
+  BOX = 2
+  CAPSULE = 3
 
 class Contact(NamedTuple):
   pair_indices: tuple[int, int]
@@ -22,16 +22,13 @@ def create_soa_body_data(positions: list[np.ndarray], velocities: list[np.ndarra
                          shape_params: list[np.ndarray]) -> dict[str, np.ndarray]:
     n_bodies = len(positions)
     
-    # Stack into SoA format
-    x = np.stack(positions, axis=0)  # (N, 3)
-    v = np.stack(velocities, axis=0)  # (N, 3)
-    q = np.stack(orientations, axis=0)  # (N, 4)
-    omega = np.stack(angular_vels, axis=0)  # (N, 3)
+    x = np.stack(positions, axis=0)
+    v = np.stack(velocities, axis=0)
+    q = np.stack(orientations, axis=0)
+    omega = np.stack(angular_vels, axis=0)
     
-    # Convert masses to inv_mass
     inv_mass = np.array([1.0 / m if m < 1e7 else 0.0 for m in masses], dtype=np.float32)
     
-    # Compute inertia tensors and convert to inv_inertia
     inv_inertia = np.zeros((n_bodies, 3, 3), dtype=np.float32)
     for i, (mass, shape_type, params) in enumerate(zip(masses, shape_types, shape_params)):
         if shape_type == ShapeType.SPHERE:
@@ -50,9 +47,8 @@ def create_soa_body_data(positions: list[np.ndarray], velocities: list[np.ndarra
         
         inv_inertia[i] = np.linalg.inv(inertia)
     
-    # Shape data
     shape_type_array = np.array([st.value for st in shape_types], dtype=np.int32)
-    shape_param_array = np.stack(shape_params, axis=0)  # (N, 3)
+    shape_param_array = np.stack(shape_params, axis=0)
     
     return {
         'x': x,

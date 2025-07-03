@@ -3,37 +3,36 @@ from tinygrad import Tensor, TinyJit
 from .xpbd.broadphase import uniform_spatial_hash
 from .xpbd.narrowphase import generate_contacts
 from .xpbd.solver import solve_constraints
+from .xpbd.velocity_solver import solve_velocities
 from .xpbd.velocity_update import reconcile_velocities
 from .xpbd.integration import predict_state
 
 def _physics_step_static(x: Tensor, q: Tensor, v: Tensor, omega: Tensor, 
                          inv_mass: Tensor, inv_inertia: Tensor, shape_type: Tensor, shape_params: Tensor,
-                         dt: float, gravity: Tensor, restitution: float = 0.1) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-  # Store original state for velocity reconciliation
+                         dt: float, gravity: Tensor, restitution: float = 0.1,
+                         solver_iterations: int = 8, contact_compliance: float = 0.01) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   x_old, q_old = x, q
   
-  # 1. Forward Prediction: Apply external forces and predict new state
   x_pred, q_pred, v_new, omega_new = predict_state(x, q, v, omega, inv_mass, inv_inertia, gravity, dt)
   
-  # 2. Collision Detection: Broadphase using uniform spatial hash
   candidate_pairs = uniform_spatial_hash(x_pred, shape_type, shape_params)
   
-  # 3. Collision Detection: Narrowphase to generate contacts
-  contacts = generate_contacts(x_pred, q_pred, candidate_pairs, shape_type, shape_params)
+  contacts = generate_contacts(x_pred, q_pred, candidate_pairs, shape_type, shape_params, contact_compliance)
   
-  # 4. XPBD Solve: Position constraint solving
-  x_proj, q_proj = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, iterations=8)
+  x_proj, q_proj = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt, iterations=solver_iterations)
   
-  # 5. Velocity Reconciliation: Update velocities from position changes
-  v_final, omega_final = reconcile_velocities(x_proj, q_proj, x_old, q_old, v_new, omega_new, dt)
+  v_reconciled, omega_reconciled = reconcile_velocities(x_proj, q_proj, x_old, q_old, v_new, omega_new, dt)
+  
+  v_final, omega_final = solve_velocities(v_reconciled, omega_reconciled, contacts, inv_mass, inv_inertia, dt, restitution)
   
   return x_proj, q_proj, v_final, omega_final
 
 def _n_step_simulation(x: Tensor, q: Tensor, v: Tensor, omega: Tensor,
                       inv_mass: Tensor, inv_inertia: Tensor, shape_type: Tensor, shape_params: Tensor,
-                      dt: float, gravity: Tensor, num_steps: int, restitution: float = 0.1) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+                      dt: float, gravity: Tensor, num_steps: int, restitution: float = 0.1,
+                      solver_iterations: int = 8, contact_compliance: float = 0.01) -> tuple[Tensor, Tensor, Tensor, Tensor]:
   for _ in range(num_steps):
-    x, q, v, omega = _physics_step_static(x, q, v, omega, inv_mass, inv_inertia, shape_type, shape_params, dt, gravity, restitution)
+    x, q, v, omega = _physics_step_static(x, q, v, omega, inv_mass, inv_inertia, shape_type, shape_params, dt, gravity, restitution, solver_iterations, contact_compliance)
   return x, q, v, omega
 
 class TensorPhysicsEngine:
@@ -41,8 +40,8 @@ class TensorPhysicsEngine:
   def __init__(self, x: np.ndarray, q: np.ndarray, v: np.ndarray, omega: np.ndarray,
                inv_mass: np.ndarray, inv_inertia: np.ndarray, shape_type: np.ndarray, shape_params: np.ndarray,
                gravity: np.ndarray = np.array([0, -9.81, 0], dtype=np.float32),
-               dt: float = 0.016, restitution: float = 0.1):
-    # Convert to tensors and store SoA state
+               dt: float = 0.016, restitution: float = 0.1,
+               solver_iterations: int = 8, contact_compliance: float = 0.01):
     self.x = Tensor(x.astype(np.float32))
     self.q = Tensor(q.astype(np.float32))
     self.v = Tensor(v.astype(np.float32))
@@ -55,18 +54,20 @@ class TensorPhysicsEngine:
     self.gravity = Tensor(gravity.astype(np.float32))
     self.dt = dt
     self.restitution = restitution
+    self.solver_iterations = solver_iterations
+    self.contact_compliance = contact_compliance
     
     self.jitted_n_step = TinyJit(lambda x, q, v, omega, num_steps: _n_step_simulation(
       x, q, v, omega, self.inv_mass, self.inv_inertia, self.shape_type, self.shape_params,
-      self.dt, self.gravity, num_steps, self.restitution))
+      self.dt, self.gravity, num_steps, self.restitution, self.solver_iterations, self.contact_compliance))
     self.jitted_step = TinyJit(lambda x, q, v, omega: _physics_step_static(
       x, q, v, omega, self.inv_mass, self.inv_inertia, self.shape_type, self.shape_params,
-      self.dt, self.gravity, self.restitution))
+      self.dt, self.gravity, self.restitution, self.solver_iterations, self.contact_compliance))
     
   def _physics_step(self) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     return _physics_step_static(self.x, self.q, self.v, self.omega, 
                                self.inv_mass, self.inv_inertia, self.shape_type, self.shape_params,
-                               self.dt, self.gravity, self.restitution)
+                               self.dt, self.gravity, self.restitution, self.solver_iterations, self.contact_compliance)
   
   def run_simulation(self, num_steps: int) -> None:
     self.x, self.q, self.v, self.omega = self.jitted_n_step(self.x, self.q, self.v, self.omega, num_steps)
@@ -76,7 +77,7 @@ class TensorPhysicsEngine:
       self.dt = dt
       self.jitted_step = TinyJit(lambda x, q, v, omega: _physics_step_static(
         x, q, v, omega, self.inv_mass, self.inv_inertia, self.shape_type, self.shape_params,
-        self.dt, self.gravity, self.restitution))
+        self.dt, self.gravity, self.restitution, self.solver_iterations, self.contact_compliance))
     
     self.x, self.q, self.v, self.omega = self.jitted_step(self.x, self.q, self.v, self.omega)
   
