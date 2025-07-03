@@ -4,27 +4,6 @@ from ..math_utils import quat_mul, quat_exp, quat_normalize, cross_product, appl
 
 def predict_state(x: Tensor, q: Tensor, v: Tensor, omega: Tensor, 
                   inv_mass: Tensor, inv_inertia: Tensor, gravity: Tensor, dt: float) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    """Perform forward prediction step of XPBD physics simulation.
-    
-    Updates velocities based on forces and predicts next state for positions and orientations.
-    
-    Args:
-        x: Current positions (N, 3)
-        q: Current orientations as quaternions (N, 4) in format [w, x, y, z]
-        v: Current linear velocities (N, 3)
-        omega: Current angular velocities (N, 3)
-        inv_mass: Inverse masses (N,)
-        inv_inertia: Inverse inertia tensors (N, 3, 3)
-        gravity: Gravity vector (3,)
-        dt: Time step
-    
-    Returns:
-        Tuple of (x_pred, q_pred, v_new, omega_new)
-        - x_pred: Predicted positions (N, 3)
-        - q_pred: Predicted orientations (N, 4)
-        - v_new: Updated linear velocities (N, 3)
-        - omega_new: Updated angular velocities (N, 3)
-    """
     # 1. Update linear velocity based on external forces
     # f_total = m * g for each body (gravity is the only force for now)
     # v_new = v + f_total * inv_mass * dt

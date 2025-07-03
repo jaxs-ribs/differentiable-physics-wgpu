@@ -1,125 +1,119 @@
-# Differentiable Physics in Tinygrad
+# Project Phoenix: The XPBD Physics Engine
 
-## I. Core Mission
+## I. Core Mission & Philosophy
 
-Our objective is to build a "Brax-like" rigid-body physics engine deeply integrated into the `tinygrad` ecosystem. This engine will be:
+Our objective is to build a high-performance, batch-differentiable rigid-body physics engine, "Phoenix," deeply integrated into the `tinygrad` ecosystem. This engine is designed for modern machine learning research, with a primary focus on WebGPU for maximum portability.
 
-1.  **Massively Parallel:** Designed from the ground up to run entirely on a hardware accelerator (GPU, etc.) without host-CPU roundtrips during simulation rollouts. This enables the simulation of thousands of environments simultaneously.
-2.  **Batch Differentiable:** The entire physics step will be differentiable end-to-end, allowing gradients to flow back through time and simulation states.
-3.  **Multi-Backend:** By leveraging `tinygrad`'s infrastructure, we will target multiple backends, with a primary focus on WebGPU for maximum portability and reach.
+Our engineering philosophy is defined by three pillars:
+1.  **Extreme Observability:** We build systems we can see, with telemetry and tracing as first-class citizens.
+2.  **Rigorous Test-Driven Development (TDD):** The test suite is our definition of correctness. No feature is complete until its corresponding high-signal test case passes.
+3.  **One-Kernel Philosophy:** The Python implementation (the "oracle") must be a pure tensor-based function that directly maps to a single, fused WGSL compute kernel later. This ensures performance is designed in from day one.
 
-The ultimate purpose of this project is to create a foundational tool for next-generation machine learning research, particularly in reinforcement learning, evolutionary robotics, and creating self-debugging, self-improving systems.
+---
 
-## II. Guiding Principles
+## II. The XPBD Pipeline: Technical Specification
 
-This project will be executed with an unwavering commitment to quality and clarity. Our engineering philosophy is defined by three core pillars:
+The engine implements an Extended Position-Based Dynamics (XPBD) solver. The following sequence of operations is the ground truth for our implementation, from the Python oracle to the final WGSL kernel.
 
-1.  **Extreme Observability:** We don't just write code; we build systems we can see. Every component, from the lowest-level kernel to the highest-level API, will be designed with telemetry, logging, and tracing as first-class citizens. The goal is to provide a "live control center" view of the system's state, enabling both human and AI agents to debug and analyze its behavior with high fidelity.
+*   **0. Inputs (State Before Step)**
+    *   **Body State (SoA):** `x [B,N,3]`, `q [B,N,4]`, `v [B,N,3]`, `ω [B,N,3]`
+    *   **Body Constants:** `inv_mass [N]`, `inv_inertia [N,3,3]`, shape parameters
+    *   **Joints & Actions:** Joint definitions, motor strengths, action tensors `τ_action`
 
-2.  **Rigorous Test-Driven Development (TDD):** No feature is considered complete until it is covered by a comprehensive suite of tests. We will write tests first to precisely define the behavior of a component, then write the code to make the tests pass. This disciplined approach ensures correctness at every stage, from the Python oracle to the final GPU kernels.
+*   **1. Forward Prediction**
+    *   Apply external forces (gravity, motors) to get `a` and `τ`.
+    *   `v ← v + a·dt`
+    *   `ω ← ω + I⁻¹·(τ − ω×Iω)·dt` (includes gyroscopic term)
+    *   `x_pred ← x + v·dt`
+    *   `q_pred ← normalize( q ⊗ exp(½·ω·dt) )`
 
-3.  **Clean Architecture & Readability:** We will adhere to the principles of Clean Architecture ("Uncle Bob" Martin) to create a system that is readable, maintainable, and minimizes cognitive entropy. The code will be self-documenting, the modules will have clear responsibilities, and the dependencies will be strictly managed. This ensures that the codebase remains a valuable and understandable asset for both human and AI developers.
+*   **2. Collision Detection**
+    *   **Broadphase:** Uniform spatial hash on `x_pred` to find candidate pairs.
+    *   **Narrowphase:** Analytic overlap tests (sphere-plane, sphere-sphere, box-plane) on candidate pairs to generate contacts.
+    *   **Output:** Tensors for contact points: `ids_a [K]`, `ids_b [K]`, normal `n [K,3]`, soft penetration `p [K]`, compliance `α`.
 
-## III. The Four-Phase Master Plan
+*   **3. Constraint Assembly**
+    *   Build a single, unified list of all XPBD constraints (contacts, joints, etc.). Each entry contains body indices, Jacobians, and compliance `α`.
 
-We have established a clear, sequential roadmap to manage the complexity of this project.
+*   **4. XPBD Solver Loop (e.g., 8 Jacobi Iterations)**
+    *   For each constraint, evaluate violation `C(x_pred)`.
+    *   Compute Lagrange multiplier update: `Δλ = −C / (α/dt² + M̃)`, where `M̃` is the effective mass.
+    *   Accumulate position/orientation corrections (`Δx_buf`, `Δq_buf`) from `Δλ`.
+    *   After loop: `x_proj = x_pred + Δx_buf`, `q_proj = normalize(q_pred + Δq_buf)`.
 
--   **Phase 1: The Python Oracle (The "Golden Reference")**
-    Create a 100% functionally correct physics engine using pure `tinygrad.Tensor` and `numpy` operations. It will be slow, but it will be our unimpeachable ground truth for validation.
+*   **5. Velocity Reconciliation**
+    *   `v_new ← (x_proj − x) / dt`
+    *   `ω_new ← 2·log(q⁻¹ ⊗ q_proj)/dt`
+    *   Optionally apply damping.
 
--   **Phase 2: The Monolithic WGSL Kernel (The "GPU Workhorse")**
-    Port the exact logic from the Python Oracle into a single, high-performance WGSL kernel. This kernel will execute the entire physics step on the GPU.
+*   **6. State Commit & Output**
+    *   Update main state: `x ← x_proj`, `q ← q_proj`, `v ← v_new`, `ω ← ω_new`.
+    *   Return observation dictionary for RL loops, retaining the autograd tape.
 
--   **Phase 3: The `Ops.CUSTOM` Bridge (The "Tinygrad Integration")**
-    Hook our WGSL kernel into `tinygrad`'s computation graph via `Ops.CUSTOM`. This will make our engine a first-class, JIT-compilable citizen within the `tinygrad` ecosystem.
+---
 
--   **Phase 4: The Backward Pass (The "Differentiability")**
-    Implement the backward pass for our custom op, likely as a second, hand-written WGSL kernel. This will unlock end-to-end differentiability.
+## III. Validation Suite: High-Signal Test Scenes
 
-## IV. Current Status & Completed Work
+This suite defines the validation benchmarks for the engine. Each milestone must pass all preceding tests.
 
-### Phase 1 Status: COMPLETE ✓
+1.  **Sphere Drop on Plane**
+    *   *Stresses*: Gravity, contact generation, basic XPBD math.
+    *   *Assert*: Max penetration depth ≤ 0.5 mm after 1 s.
 
-The Python Oracle has been successfully implemented with all core components:
+2.  **Elastic Bounce** (restitution = 0.8)
+    *   *Stresses*: Restitution term, velocity reconciliation.
+    *   *Assert*: Second apex height within ±2% of analytic `h·0.8²`.
 
-1. **Pure Tensor Operations** - Eliminated all NumPy dependencies from core physics modules
-   - Replaced NumPy array operations with TinyGrad tensors
-   - Implemented pure tensor pair generation for broadphase
-   - Converted all gather/scatter operations to tensor equivalents
+3.  **Cube Landing on Corner**
+    *   *Stresses*: Inertia tensor handling, box contact manifold.
+    *   *Assert*: Cube settles upright (no spin) and COM drift < 1 mm.
 
-2. **N-Step JIT Compilation** - Entire simulations can run as single JIT-compiled kernels
-   - Created `_n_step_simulation()` function with internal loop
-   - Static physics step function for JIT compatibility
-   - Supports both single-step and N-step simulation modes
+4.  **Ten-Cube Stack**
+    *   *Stresses*: Solver stability, broad-phase hashing saturation.
+    *   *Assert*: Tallest cube vertical drift < 3 mm over 10 s.
 
-3. **Complete Physics Pipeline**
-   - ✓ Broadphase: Differentiable all-pairs AABB collision detection
-   - ✓ Narrowphase: Sphere-sphere and sphere-box collision detection
-   - ✓ Solver: Impulse-based collision resolution with Baumgarte stabilization
-   - ✓ Integration: Semi-implicit Euler with quaternion updates
+5.  **Hinge Pendulum**
+    *   *Stresses*: Joint XPBD Jacobian, angle integration.
+    *   *Assert*: Hinge length error < 0.5 mm; period matches `2π√(L/g)` within 2%.
 
-4. **Bug Fixes & Stability**
-   - Fixed position corruption issue (NaN → [1,1,1] bug)
-   - Improved empty contact handling in solver
-   - Worked around TinyGrad's Tensor.where() NaN bug
+6.  **Double Pendulum (Chaotic)**
+    *   *Stresses*: Joint stacking, quaternion update, energy conservation.
+    *   *Assert*: Total mechanical energy change < 1% over 30 s with damping = 0.
 
-5. **Testing Infrastructure**
-   - Comprehensive CI test suite (7 tests, all passing)
-   - Organized test structure with unit, integration, benchmarks, and debugging tests
-   - Created diagnostic tools for deep debugging
+7.  **Motor-Driven Upright** (Single Hinge)
+    *   *Stresses*: Actuator path, action→torque→constraint flow.
+    *   *Assert*: Pendulum reaches ±5° of target in < 2 s without oscillation > 10°.
 
-### Next Phase: Ready for Phase 2
+8.  **Slope Slide with Friction** (μ=0.5)
+    *   *Stresses*: Contact tangent projection, friction clamp.
+    *   *Assert*: Acceleration down slope ≈ `g·(sinθ − μ·cosθ)` within 5%.
 
-The Python Oracle is complete and validated. The codebase is ready to proceed with:
-- **Phase 2:** Port to monolithic WGSL kernel for GPU execution
-- **Phase 3:** Integration via Ops.CUSTOM
-- **Phase 4:** Backward pass implementation
+9.  **Ragdoll Drop** (Five linked boxes)
+    *   *Stresses*: Many joints + contacts + cross-body inertia.
+    *   *Assert*: No NaNs, joint errors < 2 mm, simulation survives 60 s.
 
-## V. Custom Op Implementation (Proof of Concept)
+10. **Tendon-Spring Oscillator**
+    *   *Stresses*: Compliant XPBD, stiffness-vs-dt independence.
+    *   *Assert*: Oscillation period independent of solver iteration count (1, 4, 8 iters differ < 1%).
 
-### Phase 3 Exploration: COMPLETE ✓
+11. **Hill Muscle Kick** (Planar Leg)
+    *   *Stresses*: Activation dynamics, variable rest length.
+    *   *Assert*: Knee extends to 90° when `a=1`; gradient `∂θ/∂a ≠ 0`.
 
-A proof-of-concept implementation of TinyGrad custom ops has been created to demonstrate the integration approach:
+12. **Batch Regression** (256 Walkers)
+    *   *Stresses*: Memory layout, WGSL one-kernel path, throughput.
+    *   *Assert*: `steps/s ≥ target`; `max|state_gpu − state_py| < 1e-5`.
 
-1. **C Physics Library** (`physics_lib.c`)
-   - Implemented core physics operations in C for high performance
-   - `physics_step()` - Complete physics simulation step
-   - `physics_integrate()` - Position/velocity integration
-   - `physics_collisions()` - Collision detection and response
-   - Compiled as shared library (.so/.dylib)
+---
 
-2. **Pattern Matching Integration** (`physics_patterns.py`)
-   - Created PatternMatcher to recognize physics computation patterns
-   - Transforms high-level operations to CUSTOM ops
-   - Provides framework for operation fusion and optimization
+## IV. Observability Hooks
 
-3. **Device Extension Mechanism** (`physics_extension.py`)
-   - `PhysicsEnabledRenderer` - Wraps existing renderers without modifying TinyGrad
-   - Works with any TinyGrad device (CPU, GPU, etc.)
-   - Context manager for temporary physics enablement
-   - No TinyGrad core modifications required
+These tools are first-class components of the engine, essential for development and debugging.
 
-4. **High-Level API** (`physics_tensor_ops.py`)
-   - `PhysicsTensor` class extends Tensor with physics methods
-   - Demonstrates integration with TinyGrad's tensor operations
-   - Performance benchmarking shows efficient C function calls
-
-### Key Insights from Custom Op Implementation:
-
-1. **Non-invasive Integration**: Successfully demonstrated extending TinyGrad without modifying core code
-2. **Device Agnostic**: Physics ops work with existing devices rather than requiring custom device
-3. **Pattern Matching**: TinyGrad's PatternMatcher provides powerful optimization opportunities
-4. **CUSTOM Op Format**: Format strings enable clean C function integration
-
-### Implementation Status:
-- ✓ C library compiles and passes tests
-- ✓ Pattern matcher framework established
-- ✓ Device extension mechanism working
-- ✓ Basic demonstrations functional
-- ⚠️ Full UOp graph integration pending
-- ⚠️ GPU kernels not yet implemented
-
-This proof-of-concept validates the approach for Phase 3 and provides a foundation for full integration. 
+*   **Per-Step Stats Tensor**: A tensor updated each frame containing: `penetration_max`, `joint_error_max`, `energy`, `λ_rms`, `pairs_count`. Batched for histogram plotting.
+*   **Gradient Checker**: A CI utility that uses finite-difference to verify autograd gradients for key parameters.
+*   **Replay-to-Video Helper**: A script to dump simulation state and invoke the renderer, crucial for visualizing changes.
+*   **Performance Counters**: Wall-clock ms per pipeline stage (integrate, broad, narrow, solve) logged to CI to catch performance regressions.
 
 # tinygrad agents
 

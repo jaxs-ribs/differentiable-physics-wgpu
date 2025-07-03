@@ -6,7 +6,6 @@ class ExecutionMode(IntEnum):
     ORACLE = 0
 
 class ShapeType(IntEnum):
-  """Supported collision shapes."""
   SPHERE = 0   # param_1: radius
   BOX = 2      # param_1,2,3: half_extents x,y,z
   CAPSULE = 3  # param_1: half-height, param_2: radius
@@ -21,7 +20,6 @@ def create_soa_body_data(positions: list[np.ndarray], velocities: list[np.ndarra
                          orientations: list[np.ndarray], angular_vels: list[np.ndarray],
                          masses: list[float], shape_types: list[ShapeType], 
                          shape_params: list[np.ndarray]) -> dict[str, np.ndarray]:
-    """Create SoA body data from lists of individual body properties."""
     n_bodies = len(positions)
     
     # Stack into SoA format
