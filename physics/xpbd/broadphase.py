@@ -1,21 +1,18 @@
 from tinygrad import Tensor, dtypes
-
-HASH_TABLE_SIZE = 8192
-MAX_BODIES_PER_CELL = 32
-CELL_SIZE = 2.0
-BIAS = 1000.0
-
-PRIME_X = 73856093
-PRIME_Y = 19349663
-PRIME_Z = 83492791
+from .broadphase_consts import *
+from .broadphase_efficient import efficient_spatial_hash
+from .broadphase_optimized import spatial_hash_optimized
 
 
 def uniform_spatial_hash(x: Tensor, shape_type: Tensor, shape_params: Tensor) -> Tensor:
+    """Legacy O(N²) implementation - kept for compatibility.
+    Use efficient_spatial_hash or spatial_hash_optimized for better performance.
+    """
     N = x.shape[0]
     
     biased_pos = x + BIAS
     
-    cell_ids = (biased_pos / CELL_SIZE).floor().cast(dtypes.int32)
+    cell_ids = (biased_pos / DEFAULT_CELL_SIZE).floor().cast(dtypes.int32)
     
     cx = cell_ids[:, 0]
     cy = cell_ids[:, 1]
@@ -74,7 +71,33 @@ def generate_pairs(cell_ids: Tensor, hash_keys: Tensor, hash_table: Tensor, B: i
 
 
 def find_candidate_pairs(x_pred: Tensor, shape_type: Tensor, shape_params: Tensor, 
-                        cell_size: float = CELL_SIZE, table_size: int = HASH_TABLE_SIZE,
-                        max_bodies_per_cell: int = MAX_BODIES_PER_CELL) -> Tensor:
+                        cell_size: float = DEFAULT_CELL_SIZE, table_size: int = HASH_TABLE_SIZE,
+                        max_bodies_per_cell: int = MAX_BODIES_PER_CELL,
+                        use_efficient: bool = True) -> Tensor:
+    """Find collision candidate pairs using spatial hashing.
+    
+    Args:
+        x_pred: Body positions (B, N, 3)
+        shape_type: Shape types (B, N)
+        shape_params: Shape parameters (B, N, P)
+        cell_size: Grid cell size
+        table_size: Hash table size
+        max_bodies_per_cell: Maximum bodies per cell (unused in efficient version)
+        use_efficient: Use O(N) efficient implementation instead of O(N²) legacy
+    
+    Returns:
+        Candidate collision pairs (num_pairs, 2)
+    """
     B, N, _ = x_pred.shape
-    return uniform_spatial_hash(x_pred[0], shape_type[0], shape_params[0])
+    
+    if use_efficient:
+        # Use memory-efficient O(N) implementation
+        if N > 1000:
+            # For large N, use the optimized version with batching
+            return spatial_hash_optimized(x_pred[0], shape_type[0], shape_params[0], cell_size)
+        else:
+            # For smaller N, use the efficient version
+            return efficient_spatial_hash(x_pred[0], shape_type[0], shape_params[0], cell_size, table_size)
+    else:
+        # Legacy O(N²) implementation
+        return uniform_spatial_hash(x_pred[0], shape_type[0], shape_params[0])
