@@ -49,14 +49,15 @@ def test_create_soa_body_data_single_body():
     masses = [1.0]
     shape_types = [ShapeType.SPHERE]
     shape_params = [np.array([1, 0, 0], dtype=np.float32)]
+    frictions = [0.5]  # Default friction
     
     soa_data = create_soa_body_data(
         positions, velocities, orientations, angular_vels,
-        masses, shape_types, shape_params
+        masses, shape_types, shape_params, frictions
     )
     
     # Check all fields are present
-    expected_fields = ['x', 'v', 'q', 'omega', 'inv_mass', 'inv_inertia', 'shape_type', 'shape_params']
+    expected_fields = ['x', 'v', 'q', 'omega', 'inv_mass', 'inv_inertia', 'shape_type', 'shape_params', 'friction']
     for field in expected_fields:
         assert field in soa_data
     
@@ -92,10 +93,11 @@ def test_create_soa_body_data_multiple_bodies():
         np.array([1, 1, 1], dtype=np.float32),
         np.array([2, 0.5, 0], dtype=np.float32),
     ]
+    frictions = [0.5, 0.5, 0.5]  # Default friction for all bodies
     
     soa_data = create_soa_body_data(
         positions, velocities, orientations, angular_vels,
-        masses, shape_types, shape_params
+        masses, shape_types, shape_params, frictions
     )
     
     # Check shapes
@@ -121,10 +123,11 @@ def test_create_soa_infinite_mass():
     masses = [1e7 + 1]  # Just above the cutoff (treated as infinite)
     shape_types = [ShapeType.BOX]
     shape_params = [np.array([10, 1, 10], dtype=np.float32)]
+    frictions = [0.5]  # Default friction
     
     soa_data = create_soa_body_data(
         positions, velocities, orientations, angular_vels,
-        masses, shape_types, shape_params
+        masses, shape_types, shape_params, frictions
     )
     
     # Inverse mass should be 0 for static bodies
@@ -148,10 +151,11 @@ def test_create_soa_different_shapes():
         np.array([1, 2, 3], dtype=np.float32),      # Box: half-extents
         np.array([3, 0.5, 0], dtype=np.float32),    # Capsule: half-height=3, radius=0.5
     ]
+    frictions = [0.5, 0.5, 0.5]  # Default friction for all bodies
     
     soa_data = create_soa_body_data(
         positions, velocities, orientations, angular_vels,
-        masses, shape_types, shape_params
+        masses, shape_types, shape_params, frictions
     )
     
     # Check shape params are preserved

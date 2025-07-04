@@ -1,13 +1,9 @@
 from tinygrad import Tensor, dtypes
 from .broadphase_consts import *
-from .broadphase_efficient import efficient_spatial_hash
-from .broadphase_optimized import spatial_hash_optimized
 
 
 def uniform_spatial_hash(x: Tensor, shape_type: Tensor, shape_params: Tensor) -> Tensor:
-    """Legacy O(N²) implementation - kept for compatibility.
-    Use efficient_spatial_hash or spatial_hash_optimized for better performance.
-    """
+    """Simple O(N²) spatial hashing implementation that is tinygrad-compatible."""
     N = x.shape[0]
     
     biased_pos = x + BIAS
@@ -72,8 +68,7 @@ def generate_pairs(cell_ids: Tensor, hash_keys: Tensor, hash_table: Tensor, B: i
 
 def find_candidate_pairs(x_pred: Tensor, shape_type: Tensor, shape_params: Tensor, 
                         cell_size: float = DEFAULT_CELL_SIZE, table_size: int = HASH_TABLE_SIZE,
-                        max_bodies_per_cell: int = MAX_BODIES_PER_CELL,
-                        use_efficient: bool = True) -> Tensor:
+                        max_bodies_per_cell: int = MAX_BODIES_PER_CELL) -> Tensor:
     """Find collision candidate pairs using spatial hashing.
     
     Args:
@@ -82,22 +77,12 @@ def find_candidate_pairs(x_pred: Tensor, shape_type: Tensor, shape_params: Tenso
         shape_params: Shape parameters (B, N, P)
         cell_size: Grid cell size
         table_size: Hash table size
-        max_bodies_per_cell: Maximum bodies per cell (unused in efficient version)
-        use_efficient: Use O(N) efficient implementation instead of O(N²) legacy
+        max_bodies_per_cell: Maximum bodies per cell
     
     Returns:
         Candidate collision pairs (num_pairs, 2)
     """
     B, N, _ = x_pred.shape
     
-    if use_efficient:
-        # Use memory-efficient O(N) implementation
-        if N > 1000:
-            # For large N, use the optimized version with batching
-            return spatial_hash_optimized(x_pred[0], shape_type[0], shape_params[0], cell_size)
-        else:
-            # For smaller N, use the efficient version
-            return efficient_spatial_hash(x_pred[0], shape_type[0], shape_params[0], cell_size, table_size)
-    else:
-        # Legacy O(N²) implementation
-        return uniform_spatial_hash(x_pred[0], shape_type[0], shape_params[0])
+    # Use the simple O(N²) implementation that is tinygrad-compatible
+    return uniform_spatial_hash(x_pred[0], shape_type[0], shape_params[0])

@@ -439,66 +439,59 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
     normal = Tensor.zeros((batch_size, 3))
     contact_point = Tensor.zeros((batch_size, 3))
     
-    # Build pair keys for batched execution
-    pair_key = shape_type_a * MAX_SHAPE_TYPE + shape_type_b
-    
-    # Get unique pair types
-    unique_keys = np.unique(pair_key.numpy())
-    
-    for key_val in unique_keys:
-        # Decode shape types from key
-        type_a_val = int(key_val // MAX_SHAPE_TYPE)
-        type_b_val = int(key_val % MAX_SHAPE_TYPE)
-        
-        # Get canonical ordering
-        type_lo = min(type_a_val, type_b_val)
-        type_hi = max(type_a_val, type_b_val)
-        lookup_key = (type_lo, type_hi)
-        
-        if lookup_key not in COLLISION_TABLE:
-            continue
+    # Process all pairs - avoiding nonzero and scatter which don't exist in tinygrad
+    # For each possible shape type combination, test all pairs
+    for type_a_val in range(MAX_SHAPE_TYPE):
+        for type_b_val in range(MAX_SHAPE_TYPE):
+            # Get canonical ordering
+            type_lo = min(type_a_val, type_b_val)
+            type_hi = max(type_a_val, type_b_val)
+            lookup_key = (type_lo, type_hi)
             
-        # Build mask for this pair type
-        mask = pair_key == key_val
-        
-        if not mask.any().numpy():
-            continue
+            if lookup_key not in COLLISION_TABLE:
+                continue
             
-        # Get indices for this pair type
-        indices = mask.nonzero().squeeze(-1)
-        
-        # Slice tensors to this pair type
-        x_a_slice = x_a.gather(0, indices.unsqueeze(-1).expand(-1, 3))
-        x_b_slice = x_b.gather(0, indices.unsqueeze(-1).expand(-1, 3))
-        q_a_slice = q_a.gather(0, indices.unsqueeze(-1).expand(-1, 4))
-        q_b_slice = q_b.gather(0, indices.unsqueeze(-1).expand(-1, 4))
-        params_a_slice = params_a.gather(0, indices.unsqueeze(-1).expand(-1, 3))
-        params_b_slice = params_b.gather(0, indices.unsqueeze(-1).expand(-1, 3))
-        
-        # Check if we need to swap inputs
-        swapped = type_a_val > type_b_val
-        
-        if swapped:
-            # Swap inputs to match canonical ordering
-            x_a_slice, x_b_slice = x_b_slice, x_a_slice
-            q_a_slice, q_b_slice = q_b_slice, q_a_slice
-            params_a_slice, params_b_slice = params_b_slice, params_a_slice
-        
-        # Call collision test
-        test_func = COLLISION_TABLE[lookup_key]
-        pen_slice, norm_slice, cp_slice = test_func(
-            x_a_slice, x_b_slice, q_a_slice, q_b_slice, 
-            params_a_slice, params_b_slice
-        )
-        
-        # Flip normal if swapped
-        if swapped:
-            norm_slice = -norm_slice
-        
-        # Scatter results back
-        penetration = penetration.scatter(0, indices, pen_slice)
-        normal = normal.scatter(0, indices.unsqueeze(-1).expand(-1, 3), norm_slice)
-        contact_point = contact_point.scatter(0, indices.unsqueeze(-1).expand(-1, 3), cp_slice)
+            # Build mask for this pair type
+            mask = (shape_type_a == type_a_val) & (shape_type_b == type_b_val)
+            
+            if not mask.any().numpy():
+                continue
+            
+            # Check if we need to swap inputs
+            swapped = type_a_val > type_b_val
+            
+            # Process with swapping if needed
+            if swapped:
+                x_a_test = x_b
+                x_b_test = x_a
+                q_a_test = q_b
+                q_b_test = q_a
+                params_a_test = params_b
+                params_b_test = params_a
+            else:
+                x_a_test = x_a
+                x_b_test = x_b
+                q_a_test = q_a
+                q_b_test = q_b
+                params_a_test = params_a
+                params_b_test = params_b
+            
+            # Call collision test on all pairs
+            test_func = COLLISION_TABLE[lookup_key]
+            pen_test, norm_test, cp_test = test_func(
+                x_a_test, x_b_test, q_a_test, q_b_test, 
+                params_a_test, params_b_test
+            )
+            
+            # Flip normal if swapped
+            if swapped:
+                norm_test = -norm_test
+            
+            # Use mask to update results
+            mask_expanded = mask.unsqueeze(-1)
+            penetration = mask.where(pen_test, penetration)
+            normal = mask_expanded.where(norm_test, normal)
+            contact_point = mask_expanded.where(cp_test, contact_point)
     
     # Apply contact processing
     contact_mask = penetration > 0

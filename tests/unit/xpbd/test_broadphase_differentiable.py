@@ -4,8 +4,10 @@ import numpy as np
 from tinygrad import Tensor, dtypes
 from physics.xpbd.broadphase import (
     compute_cell_ids, compute_hash_keys, build_hash_table, 
-    generate_pairs, find_candidate_pairs, uniform_spatial_hash,
-    CELL_SIZE, HASH_TABLE_SIZE, MAX_BODIES_PER_CELL, BIAS
+    generate_pairs, find_candidate_pairs, uniform_spatial_hash
+)
+from physics.xpbd.broadphase_consts import (
+    DEFAULT_CELL_SIZE as CELL_SIZE, HASH_TABLE_SIZE, MAX_BODIES_PER_CELL, BIAS
 )
 from physics.types import ShapeType
 

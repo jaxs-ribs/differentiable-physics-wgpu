@@ -44,21 +44,25 @@ def test_broadphase_narrowphase_integration():
     assert has_collision_pair
     
     # Run narrowphase
-    contacts = generate_contacts(x, q, candidate_pairs, shape_type, shape_params_tensor)
+    friction = Tensor(np.full(len(positions), 0.5, dtype=np.float32))  # Default friction
+    contacts = generate_contacts(x, q, candidate_pairs, shape_type, shape_params_tensor, friction)
     
     # Should generate contacts for overlapping spheres
-    assert len(contacts) > 0
+    assert contacts['ids_a'].shape[0] > 0
     
     # Find the contact between spheres 0 and 1
-    contact_01 = None
-    for contact in contacts:
-        if contact.pair_indices == (0, 1) or contact.pair_indices == (1, 0):
-            contact_01 = contact
+    contact_01_idx = None
+    for i in range(contacts['ids_a'].shape[0]):
+        id_a = contacts['ids_a'][i].numpy()
+        id_b = contacts['ids_b'][i].numpy()
+        if (id_a == 0 and id_b == 1) or (id_a == 1 and id_b == 0):
+            contact_01_idx = i
             break
     
-    assert contact_01 is not None
-    assert contact_01.depth > 0  # Should have penetration
-    assert np.allclose(np.linalg.norm(contact_01.normal), 1.0)  # Normal should be unit vector
+    assert contact_01_idx is not None
+    assert contacts['p'][contact_01_idx].numpy() > 0  # Should have penetration
+    normal = contacts['normal'][contact_01_idx].numpy()
+    assert np.allclose(np.linalg.norm(normal), 1.0)  # Normal should be unit vector
 
 
 def test_no_false_positives():
@@ -82,10 +86,12 @@ def test_no_false_positives():
     
     # Run collision pipeline
     candidate_pairs = uniform_spatial_hash(x, shape_type, shape_params_tensor)
-    contacts = generate_contacts(x, q, candidate_pairs, shape_type, shape_params_tensor)
+    friction = Tensor(np.full(len(positions), 0.5, dtype=np.float32))  # Default friction
+    contacts = generate_contacts(x, q, candidate_pairs, shape_type, shape_params_tensor, friction)
     
     # Should have no contacts (all spheres are well separated)
-    assert len(contacts) == 0
+    valid_contacts = contacts['ids_a'] >= 0
+    assert not valid_contacts.any().numpy()
 
 
 def test_multiple_collisions():
@@ -108,16 +114,21 @@ def test_multiple_collisions():
     
     # Run collision pipeline
     candidate_pairs = uniform_spatial_hash(x, shape_type, shape_params_tensor)
-    contacts = generate_contacts(x, q, candidate_pairs, shape_type, shape_params_tensor)
+    friction = Tensor(np.full(len(positions), 0.5, dtype=np.float32))  # Default friction
+    contacts = generate_contacts(x, q, candidate_pairs, shape_type, shape_params_tensor, friction)
     
     # Should have 3 contacts (0-1, 0-2, 1-2)
-    assert len(contacts) == 3
+    valid_contacts = contacts['ids_a'] >= 0
+    assert valid_contacts.sum().numpy() == 3
     
     # Verify all pairs are detected
     detected_pairs = set()
-    for contact in contacts:
-        pair = tuple(sorted(contact.pair_indices))
-        detected_pairs.add(pair)
+    for i in range(contacts['ids_a'].shape[0]):
+        id_a = contacts['ids_a'][i].numpy()
+        id_b = contacts['ids_b'][i].numpy()
+        if id_a >= 0 and id_b >= 0:
+            pair = tuple(sorted([int(id_a), int(id_b)]))
+            detected_pairs.add(pair)
     
     expected_pairs = {(0, 1), (0, 2), (1, 2)}
     assert detected_pairs == expected_pairs
@@ -149,7 +160,9 @@ def test_mixed_shapes_collision():
     # Broadphase should find the pair
     assert len(candidate_pairs.numpy()) > 0
     
-    contacts = generate_contacts(x, q, candidate_pairs, shape_type, shape_params_tensor)
+    friction = Tensor(np.full(len(positions), 0.5, dtype=np.float32))  # Default friction
+    contacts = generate_contacts(x, q, candidate_pairs, shape_type, shape_params_tensor, friction)
     
     # Should detect collision between sphere and box
-    assert len(contacts) > 0
+    valid_contacts = contacts['ids_a'] >= 0
+    assert valid_contacts.any().numpy()
