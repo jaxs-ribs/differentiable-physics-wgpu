@@ -148,5 +148,8 @@ These tools are first-class components of the engine, essential for development 
 
 5. **Oracle Validation**: Compares WebGPU kernel outputs against the Python reference implementation to the required `1e-6` tolerance.
 
-Also: No more docstrings! They are useless! Also, no comments! Code should speak for itself!
-Also: Remember that tinygrad is in /external/: You can just read and understand the code if something related to it isn't working. 
+
+Additional notes: 
+- No more docstrings! They are useless! Also, no comments! Code should speak for itself!
+- Remember that tinygrad is in /external/: You can just read and understand the code if something related to it isn't working. 
+- Every test should have a short description at the top elucidating its purpose and how it's being done. 

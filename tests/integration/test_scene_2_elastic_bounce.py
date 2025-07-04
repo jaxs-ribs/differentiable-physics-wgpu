@@ -1,3 +1,4 @@
+"""Integration test for elastic bounce with restitution."""
 import numpy as np
 import pytest
 from physics.engine import PhysicsEngine

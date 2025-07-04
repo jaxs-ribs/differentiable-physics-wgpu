@@ -1,3 +1,4 @@
+"""Integration test for friction on a slope."""
 import numpy as np
 import pytest
 from physics.engine import PhysicsEngine

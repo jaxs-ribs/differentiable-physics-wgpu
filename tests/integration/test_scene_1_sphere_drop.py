@@ -1,3 +1,4 @@
+"""Integration test for a single sphere dropping onto a plane."""
 import numpy as np
 import pytest
 from physics.engine import PhysicsEngine

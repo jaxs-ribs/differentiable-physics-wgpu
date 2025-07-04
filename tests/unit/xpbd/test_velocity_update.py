@@ -1,4 +1,4 @@
-"""Tests for XPBD velocity reconciliation."""
+"""Tests for XPBD velocity update (reconciliation) step."""
 import pytest
 import numpy as np
 from tinygrad import Tensor

@@ -1,3 +1,4 @@
+"""Tests for the collision dispatcher."""
 import numpy as np
 from tinygrad import Tensor
 from physics.types import ShapeType
