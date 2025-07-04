@@ -14,8 +14,9 @@ def test_generate_contacts_placeholder():
     candidate_pairs = Tensor.full((10, 2), -1)  # 10 invalid pairs
     shape_type = Tensor.zeros(5)  # 5 shape types
     shape_params = Tensor.zeros(5, 3)  # 5 bodies, 3 shape parameters
+    friction = Tensor.full((5,), 0.5)  # Default friction
     
-    result = generate_contacts(x, q, candidate_pairs, shape_type, shape_params)
+    result = generate_contacts(x, q, candidate_pairs, shape_type, shape_params, friction)
     # Should return dictionary with empty arrays
     assert isinstance(result, dict)
     assert 'ids_a' in result
@@ -23,6 +24,7 @@ def test_generate_contacts_placeholder():
     assert 'normal' in result
     assert 'p' in result
     assert 'compliance' in result
+    assert 'friction' in result
 
 
 def test_generate_contacts_signature():
@@ -30,10 +32,9 @@ def test_generate_contacts_signature():
     import inspect
     sig = inspect.signature(generate_contacts)
     
-    # Should have five parameters
-    assert len(sig.parameters) == 5
-    assert 'x' in sig.parameters
-    assert 'q' in sig.parameters
-    assert 'candidate_pairs' in sig.parameters
-    assert 'shape_type' in sig.parameters
-    assert 'shape_params' in sig.parameters
+    # Should have at least six required parameters (plus optional ones)
+    required_params = ['x', 'q', 'candidate_pairs', 'shape_type', 'shape_params', 'friction']
+    assert all(p in sig.parameters for p in required_params)
+    # Check all required parameters are present
+    for param in ['x', 'q', 'candidate_pairs', 'shape_type', 'shape_params', 'friction']:
+        assert param in sig.parameters
