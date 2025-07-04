@@ -114,7 +114,38 @@ These tools are first-class components of the engine, essential for development 
 
 ### Key Scripts
 
-*   `run.py`: This is the main entry point for running a simulation and seeing the results. It performs a headless simulation for a specified number of steps, saves a trace of the entire system state to a `.npy` file in the `/artifacts` directory, and then (optionally) invokes the renderer to create an `.mp4` video with diagnostic overlays. It is designed to be configurable for running different backends and scenarios.
-*   `ci.py`: This is our continuous integration and local test runner. It executes the full test suite (`pytest`) across the `unit`, `integration`, and `scaffolding` directories. It is used to guarantee that no regressions are introduced and that all core principles are being upheld.
+#### `run.py` - Multi-Trajectory Simulation & Visualization Pipeline
+
+`run.py` is the primary interface for generating and visualizing physics simulations. Its core purpose is to:
+
+1. **Batch Trajectory Generation**: Run multiple simulation trajectories in headless mode with configurable parameters (e.g., different random seeds, initial conditions, or physics settings). Each trajectory captures the complete state evolution of all bodies in the system.
+
+2. **State Persistence**: Save complete simulation traces as `.npy` files in the `/artifacts` directory. These files contain the full state tensor history (positions, orientations, velocities, angular velocities) for every body at every timestep, enabling offline analysis and reproducible visualization.
+
+3. **Automatic Visualization**: Integrate with our Rust-based WebGPU renderer to convert saved trajectories into `.mp4` videos. The renderer pipeline automatically processes the `.npy` files without manual intervention.
+
+4. **Advanced Overlays & Comparisons**: 
+   - **Ghost Mode**: Overlay multiple simulation runs in a single video with transparency, enabling direct visual comparison of different trajectories (e.g., comparing results from different solver iterations or physics parameters).
+   - **Diagnostic Overlays**: Display real-time metrics like penetration depth, constraint violations, energy conservation, and solver convergence.
+   - **A/B Testing**: Visually compare the Python oracle implementation against the WebGPU kernel to validate correctness.
+
+5. **Configurable Backends**: Switch between different compute backends (CPU, CUDA, WebGPU) to test performance and correctness across platforms.
+
+#### `ci.py` - Continuous Integration & Validation Suite
+
+`ci.py` is our automated testing harness that enforces the core principles and validates the entire physics pipeline:
+
+1. **Comprehensive Test Execution**: Runs the full test suite across all categories:
+   - `/tests/unit`: Validates individual components (quaternion math, collision detection primitives, constraint solvers)
+   - `/tests/integration`: Tests the complete physics pipeline with the milestone scenarios
+   - `/tests/scaffolding`: Ensures foundational structures and type contracts are maintained
+
+2. **Regression Prevention**: Automatically executed on every commit to ensure no functionality is broken and all core principles (differentiability, JIT compatibility, performance targets) are upheld.
+
+3. **Performance Benchmarking**: Tracks wall-clock times for each pipeline stage to catch performance regressions early.
+
+4. **Gradient Validation**: Runs finite-difference checks against autograd gradients to ensure differentiability is preserved throughout the system.
+
+5. **Oracle Validation**: Compares WebGPU kernel outputs against the Python reference implementation to the required `1e-6` tolerance.
 
 Also: No more docstrings! They are useless! Also, no comments! Code should speak for itself!
