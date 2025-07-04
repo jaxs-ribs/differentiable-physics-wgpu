@@ -19,7 +19,7 @@ class Contact(NamedTuple):
 def create_soa_body_data(positions: list[np.ndarray], velocities: list[np.ndarray], 
                          orientations: list[np.ndarray], angular_vels: list[np.ndarray],
                          masses: list[float], shape_types: list[ShapeType], 
-                         shape_params: list[np.ndarray]) -> dict[str, np.ndarray]:
+                         shape_params: list[np.ndarray], frictions: list[float]) -> dict[str, np.ndarray]:
     n_bodies = len(positions)
     
     x = np.stack(positions, axis=0)
@@ -49,6 +49,7 @@ def create_soa_body_data(positions: list[np.ndarray], velocities: list[np.ndarra
     
     shape_type_array = np.array([st.value for st in shape_types], dtype=np.int32)
     shape_param_array = np.stack(shape_params, axis=0)
+    friction_array = np.array(frictions, dtype=np.float32)
     
     return {
         'x': x,
@@ -58,5 +59,6 @@ def create_soa_body_data(positions: list[np.ndarray], velocities: list[np.ndarra
         'inv_mass': inv_mass,
         'inv_inertia': inv_inertia,
         'shape_type': shape_type_array,
-        'shape_params': shape_param_array
+        'shape_params': shape_param_array,
+        'friction': friction_array
     }

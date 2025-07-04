@@ -48,7 +48,7 @@ def sphere_plane_test(x_sphere: Tensor, x_plane: Tensor, q_plane: Tensor,
 
 
 def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor, 
-                     shape_type: Tensor, shape_params: Tensor, compliance: float = 0.001) -> dict:
+                     shape_type: Tensor, shape_params: Tensor, friction: Tensor, compliance: float = 0.001) -> dict:
     valid_mask = candidate_pairs[:, 0] != -1
     active_pairs = candidate_pairs
     
@@ -58,7 +58,8 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
             'ids_b': Tensor.zeros((0,), dtype=dtypes.int32),
             'normal': Tensor.zeros((0, 3)),
             'p': Tensor.zeros((0,)),
-            'compliance': Tensor.zeros((0,))
+            'compliance': Tensor.zeros((0,)),
+            'friction': Tensor.zeros((0,))
         }
     
     ids_a = active_pairs[:, 0]
@@ -74,6 +75,10 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
     
     params_a = shape_params.gather(0, ids_a.unsqueeze(-1).expand(-1, 3))
     params_b = shape_params.gather(0, ids_b.unsqueeze(-1).expand(-1, 3))
+    
+    friction_a = friction.gather(0, ids_a)
+    friction_b = friction.gather(0, ids_b)
+    contact_friction = friction_a * friction_b
     
     is_sphere_a = shape_type_a == ShapeType.SPHERE
     is_sphere_b = shape_type_b == ShapeType.SPHERE
@@ -96,8 +101,6 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
     
     pen_sp_ba, norm_sp_ba, cp_sp_ba = sphere_plane_test(x_b, x_a, q_a, params_b, params_a)
     
-    norm_sp_ba = -norm_sp_ba
-    
     penetration = pen_ss
     normal = norm_ss
     contact_point = cp_ss
@@ -106,7 +109,6 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
     normal = is_sphere_plane_ab.unsqueeze(-1).where(norm_sp_ab, normal)
     contact_point = is_sphere_plane_ab.unsqueeze(-1).where(cp_sp_ab, contact_point)
     
-    # Override with plane-sphere results where appropriate
     penetration = is_sphere_plane_ba.where(pen_sp_ba, penetration)
     normal = is_sphere_plane_ba.unsqueeze(-1).where(norm_sp_ba, normal)
     contact_point = is_sphere_plane_ba.unsqueeze(-1).where(cp_sp_ba, contact_point)
@@ -128,11 +130,14 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
     compliance_tensor = Tensor.full((ids_a.shape[0],), compliance)
     final_compliance = final_mask.where(compliance_tensor, Tensor.zeros_like(compliance_tensor))
     
+    final_friction = final_mask.where(contact_friction, Tensor.zeros_like(contact_friction))
+    
     return {
         'ids_a': final_ids_a,
         'ids_b': final_ids_b,
         'normal': final_normal,
         'p': final_physical_penetration,
         'p_soft': final_soft_penetration,
-        'compliance': final_compliance
+        'compliance': final_compliance,
+        'friction': final_friction
     }

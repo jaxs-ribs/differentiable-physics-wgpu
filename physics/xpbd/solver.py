@@ -3,9 +3,9 @@ from tinygrad import Tensor, dtypes
 
 def solve_constraints(x_pred: Tensor, q_pred: Tensor, contacts: dict, 
                      inv_mass: Tensor, inv_inertia: Tensor, dt: float,
-                     iterations: int = 8) -> tuple[Tensor, Tensor]:
+                     iterations: int = 8) -> tuple[Tensor, Tensor, Tensor]:
     if 'ids_a' not in contacts or contacts['ids_a'].shape[0] == 0:
-        return x_pred, q_pred
+        return x_pred, q_pred, Tensor.zeros((0,))
     
     ids_a = contacts['ids_a']
     ids_b = contacts['ids_b']
@@ -27,7 +27,7 @@ def solve_constraints(x_pred: Tensor, q_pred: Tensor, contacts: dict,
             compliance, inv_mass, lambda_acc, dt, valid_mask
         )
     
-    return x_corrected, q_pred
+    return x_corrected, q_pred, lambda_acc
 
 
 def solver_iteration(x: Tensor, ids_a: Tensor, ids_b: Tensor, normals: Tensor, 
@@ -38,7 +38,7 @@ def solver_iteration(x: Tensor, ids_a: Tensor, ids_b: Tensor, normals: Tensor,
     
     gen_inv_mass = valid_mask.where(inv_mass_a + inv_mass_b, Tensor.ones_like(inv_mass_a))
     
-    C = valid_mask.where(penetrations, Tensor.zeros_like(penetrations))
+    C = valid_mask.where(-penetrations, Tensor.zeros_like(penetrations))
     
     alpha = compliance
     dt_squared = dt * dt
@@ -75,7 +75,6 @@ def apply_position_corrections(x: Tensor, ids_a: Tensor, ids_b: Tensor,
     idx_b_expanded = valid_ids_b.unsqueeze(-1).expand(-1, 3)
     
     corrections = corrections.scatter_reduce(0, idx_a_expanded, masked_delta_a, 'sum')
-    
     corrections = corrections.scatter_reduce(0, idx_b_expanded, masked_delta_b, 'sum')
     
     return x + corrections
