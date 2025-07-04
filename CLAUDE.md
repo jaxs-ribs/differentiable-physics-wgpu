@@ -25,6 +25,10 @@ To achieve our vision, we adhere to a set of strict, non-negotiable engineering 
     *   **The Kernel:** The eventual WebGPU kernel is the production implementation. Its forward pass and gradients will be rigorously validated against the Python oracle to a tolerance of `1e-6`.
 
 3.  **Rigorous Test-Driven Development (TDD):** The test suite is our definition of correctness and our roadmap. No feature is considered complete until its corresponding high-signal test case passes.
+    *   **Test Organization:** All tests must reside within the `/tests` directory and be categorized appropriately:
+        *   `/tests/unit`: For testing individual functions and classes in isolation.
+        *   `/tests/integration`: For testing the interactions between components, such as the full collision pipeline.
+        *   `/tests/scaffolding`: For foundational tests that ensure the basic engine structure and types are correct.
 
 4.  **Extreme Observability:** We build systems we can see. Telemetry, tracing, and visualization are not afterthoughts; they are first-class citizens in the design process.
 
@@ -107,5 +111,10 @@ These tools are first-class components of the engine, essential for development 
 *   **Gradient Checker**: A CI utility that uses finite-difference to verify autograd gradients for key parameters.
 *   **Replay-to-Video Helper**: A script to dump simulation state and invoke the renderer, crucial for visualizing changes.
 *   **Performance Counters**: Wall-clock ms per pipeline stage (integrate, broad, narrow, solve) logged to CI to catch performance regressions.
+
+### Key Scripts
+
+*   `run.py`: This is the main entry point for running a simulation and seeing the results. It performs a headless simulation for a specified number of steps, saves a trace of the entire system state to a `.npy` file in the `/artifacts` directory, and then (optionally) invokes the renderer to create an `.mp4` video with diagnostic overlays. It is designed to be configurable for running different backends and scenarios.
+*   `ci.py`: This is our continuous integration and local test runner. It executes the full test suite (`pytest`) across the `unit`, `integration`, and `scaffolding` directories. It is used to guarantee that no regressions are introduced and that all core principles are being upheld.
 
 Also: No more docstrings! They are useless! Also, no comments! Code should speak for itself!
