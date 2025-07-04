@@ -1,8 +1,18 @@
-# Project Phoenix: The XPBD Physics Engine
+# Webgpu engine
 
 ## I. Core Mission & Philosophy
 
-Our objective is to build a high-performance, batch-differentiable rigid-body physics engine, "Phoenix," deeply integrated into the `tinygrad` ecosystem. This engine is designed for modern machine learning research, with a primary focus on WebGPU for maximum portability.
+Our objective is to build a high-performance, batch-differentiable rigid-body physics engine, deeply integrated into the `tinygrad` ecosystem. This engine is designed for modern machine learning research, with a primary focus on WebGPU for maximum portability.
+
+The long term goal is to have functionality similar to brax, but using tinygrad and running in the browser. This means we want high parallilism and performance, and be able to put the physics and ml ops in one pass on the gpu. We also want to be able to execute arbitrary amounts of steps without returning to the cpu. This is achieved by using tinygrads computation graph.
+
+Later on, we could even add in the render pass to the computational graph. 
+
+When this is done, we will add RL models such as DreamerV3, and apply principles for ASAL (Automated Search for Artifical Life) by using the latent DreamerV3 world model latent vector as the novelty vector.
+
+We also want the ability to create custom phenotypes and genotypes, and evolve these. 
+
+People will be able to fork creations of others, and train fully in the browser. 
 
 Our engineering philosophy is defined by three pillars:
 1.  **Extreme Observability:** We build systems we can see, with telemetry and tracing as first-class citizens.
