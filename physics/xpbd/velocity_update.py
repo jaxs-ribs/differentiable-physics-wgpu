@@ -2,8 +2,13 @@ from tinygrad import Tensor
 from ..math_utils import quat_mul
 
 def reconcile_velocities(x_proj: Tensor, q_proj: Tensor, x_old: Tensor, q_old: Tensor, 
-                        v_old: Tensor, omega_old: Tensor, dt: float) -> tuple[Tensor, Tensor]:
-    v_reconciled = (x_proj - x_old) / dt
+                        v_pred: Tensor, omega_pred: Tensor, dt: float) -> tuple[Tensor, Tensor]:
+    # Calculate position change due to constraints
+    x_pred_no_constraints = x_old + v_pred * dt
+    delta_x = x_proj - x_pred_no_constraints
+    
+    # Apply constraint correction to predicted velocity
+    v_reconciled = v_pred + delta_x / dt
     
     q_old_conj = q_old * Tensor([1, -1, -1, -1]).unsqueeze(0)
     

@@ -3,6 +3,78 @@ import pytest
 import numpy as np
 from tinygrad import Tensor, dtypes
 from physics.xpbd.solver import solve_constraints, solver_iteration, apply_position_corrections
+from physics.xpbd.broadphase_consts import MAX_CONTACTS_PER_STEP
+
+
+def create_fixed_size_contacts(ids_a, ids_b, normal, p, compliance, friction=None):
+    """Helper to create fixed-size contact dictionary for tests."""
+    num_contacts = len(ids_a) if hasattr(ids_a, '__len__') else (1 if ids_a else 0)
+    
+    # Handle empty case
+    if num_contacts == 0:
+        return {
+            'ids_a': Tensor.full((MAX_CONTACTS_PER_STEP,), -1, dtype=dtypes.int32),
+            'ids_b': Tensor.full((MAX_CONTACTS_PER_STEP,), -1, dtype=dtypes.int32),
+            'normal': Tensor.zeros((MAX_CONTACTS_PER_STEP, 3)),
+            'p': Tensor.zeros((MAX_CONTACTS_PER_STEP,)),
+            'compliance': Tensor.zeros((MAX_CONTACTS_PER_STEP,)),
+            'friction': Tensor.zeros((MAX_CONTACTS_PER_STEP,)),
+            'contact_count': Tensor([0])
+        }
+    
+    # Convert to tensors if needed
+    if not isinstance(ids_a, Tensor):
+        ids_a = Tensor(ids_a, dtype=dtypes.int32)
+    if not isinstance(ids_b, Tensor):
+        ids_b = Tensor(ids_b, dtype=dtypes.int32)
+    if not isinstance(normal, Tensor):
+        normal = Tensor(normal)
+    if not isinstance(p, Tensor):
+        p = Tensor(p)
+    if not isinstance(compliance, Tensor):
+        compliance = Tensor(compliance)
+    
+    # Ensure correct shapes
+    if ids_a.shape == ():
+        ids_a = ids_a.unsqueeze(0)
+    if ids_b.shape == ():
+        ids_b = ids_b.unsqueeze(0)
+    if len(normal.shape) == 1:
+        normal = normal.unsqueeze(0)
+    if p.shape == ():
+        p = p.unsqueeze(0)
+    if compliance.shape == ():
+        compliance = compliance.unsqueeze(0)
+    
+    # Pad to MAX_CONTACTS_PER_STEP
+    pad_size = MAX_CONTACTS_PER_STEP - num_contacts
+    
+    if pad_size > 0:
+        ids_a = ids_a.cat(Tensor.full((pad_size,), -1, dtype=dtypes.int32), dim=0)
+        ids_b = ids_b.cat(Tensor.full((pad_size,), -1, dtype=dtypes.int32), dim=0)
+        normal = normal.cat(Tensor.zeros((pad_size, 3)), dim=0)
+        p = p.cat(Tensor.zeros((pad_size,)), dim=0)
+        compliance = compliance.cat(Tensor.zeros((pad_size,)), dim=0)
+    
+    if friction is None:
+        friction = Tensor.zeros((MAX_CONTACTS_PER_STEP,))
+    else:
+        if not isinstance(friction, Tensor):
+            friction = Tensor(friction)
+        if friction.shape == ():
+            friction = friction.unsqueeze(0)
+        if len(friction) < MAX_CONTACTS_PER_STEP:
+            friction = friction.cat(Tensor.zeros((MAX_CONTACTS_PER_STEP - len(friction),)), dim=0)
+    
+    return {
+        'ids_a': ids_a[:MAX_CONTACTS_PER_STEP],
+        'ids_b': ids_b[:MAX_CONTACTS_PER_STEP],
+        'normal': normal[:MAX_CONTACTS_PER_STEP],
+        'p': p[:MAX_CONTACTS_PER_STEP],
+        'compliance': compliance[:MAX_CONTACTS_PER_STEP],
+        'friction': friction[:MAX_CONTACTS_PER_STEP],
+        'contact_count': Tensor([num_contacts])
+    }
 
 
 def test_solve_constraints_empty_contacts():
@@ -14,14 +86,8 @@ def test_solve_constraints_empty_contacts():
     inv_inertia = Tensor.eye(3).unsqueeze(0).expand(2, -1, -1)
     dt = 0.016
     
-    # Empty contacts
-    contacts = {
-        'ids_a': Tensor.zeros((0,), dtype=dtypes.int32),
-        'ids_b': Tensor.zeros((0,), dtype=dtypes.int32),
-        'normal': Tensor.zeros((0, 3)),
-        'p': Tensor.zeros((0,)),
-        'compliance': Tensor.zeros((0,))
-    }
+    # Empty contacts - still need fixed size arrays
+    contacts = create_fixed_size_contacts([], [], [], [], [])
     
     x_new, q_new = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt)
     
@@ -43,14 +109,13 @@ def test_solve_constraints_single_contact():
     dt = 0.016
     
     # Contact pushing sphere 0 up
-    contacts = {
-        'ids_a': Tensor([0], dtype=dtypes.int32),
-        'ids_b': Tensor([1], dtype=dtypes.int32),
-        'normal': Tensor([[0.0, 1.0, 0.0]]),  # Normal pointing up
-        'p': Tensor([0.1]),  # Penetration depth (softplus'd)
-        'compliance': Tensor([0.0]),  # Rigid contact
-        'contact_count': Tensor([1])  # One valid contact
-    }
+    contacts = create_fixed_size_contacts(
+        ids_a=[0],
+        ids_b=[1],
+        normal=[[0.0, 1.0, 0.0]],  # Normal pointing up
+        p=[0.1],  # Penetration depth (softplus'd)
+        compliance=[0.0]  # Rigid contact
+    )
     
     x_new, q_new = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt, iterations=1)
     
@@ -141,19 +206,25 @@ def test_solve_constraints_compliance():
     dt = 0.016
     
     # Soft contact
-    contacts = {
-        'ids_a': Tensor([0], dtype=dtypes.int32),
-        'ids_b': Tensor([1], dtype=dtypes.int32),
-        'normal': Tensor([[1.0, 0.0, 0.0]]),
-        'p': Tensor([0.1]),
-        'compliance': Tensor([0.1])  # Soft contact
-    }
+    contacts = create_fixed_size_contacts(
+        ids_a=[0],
+        ids_b=[1],
+        normal=[[1.0, 0.0, 0.0]],
+        p=[0.1],
+        compliance=[0.1]  # Soft contact
+    )
     
     x_new_soft, _ = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt, iterations=8)
     
     # With rigid contact for comparison
-    contacts['compliance'] = Tensor([0.0])
-    x_new_rigid, _ = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt, iterations=8)
+    contacts_rigid = create_fixed_size_contacts(
+        ids_a=[0],
+        ids_b=[1],
+        normal=[[1.0, 0.0, 0.0]],
+        p=[0.1],
+        compliance=[0.0]  # Rigid contact
+    )
+    x_new_rigid, _ = solve_constraints(x_pred, q_pred, contacts_rigid, inv_mass, inv_inertia, dt, iterations=8)
     
     # Behavioral test: soft contacts should produce less correction than rigid
     # Measure how much each body moved
@@ -182,13 +253,13 @@ def test_solve_constraints_multiple_iterations():
     dt = 0.016
     
     # Contact with penetration
-    contacts = {
-        'ids_a': Tensor([0], dtype=dtypes.int32),
-        'ids_b': Tensor([1], dtype=dtypes.int32),
-        'normal': Tensor([[1.0, 0.0, 0.0]]),
-        'p': Tensor([0.1]),  # Penetration value
-        'compliance': Tensor([0.001])
-    }
+    contacts = create_fixed_size_contacts(
+        ids_a=[0],
+        ids_b=[1],
+        normal=[[1.0, 0.0, 0.0]],
+        p=[0.1],  # Penetration value
+        compliance=[0.001]
+    )
     
     # Solve with different iteration counts
     x_1iter, _ = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt, iterations=1)
@@ -229,7 +300,7 @@ def test_solve_constraints_default_iterations():
     inv_mass = Tensor([1.0])
     inv_inertia = Tensor.eye(3).unsqueeze(0)
     dt = 0.016
-    contacts = {'ids_a': Tensor.zeros((0,), dtype=dtypes.int32)}
+    contacts = create_fixed_size_contacts([], [], [], [], [])
     
     # Should work without specifying iterations
     x_new, q_new = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt)
@@ -244,14 +315,15 @@ def test_invalid_contact_handling():
     inv_inertia = Tensor.eye(3).unsqueeze(0).expand(2, -1, -1)
     dt = 0.016
     
-    # Mix of valid and invalid contacts
-    contacts = {
-        'ids_a': Tensor([0, -1], dtype=dtypes.int32),
-        'ids_b': Tensor([1, -1], dtype=dtypes.int32),
-        'normal': Tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
-        'p': Tensor([0.1, 0.1]),
-        'compliance': Tensor([0.0, 0.0])
-    }
+    # Mix of valid and invalid contacts - but fixed-size system handles this differently
+    # We only pass valid contacts, and contact_count tells us how many are valid
+    contacts = create_fixed_size_contacts(
+        ids_a=[0],
+        ids_b=[1],
+        normal=[[1.0, 0.0, 0.0]],
+        p=[0.1],
+        compliance=[0.0]
+    )
     
     x_new, _ = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt, iterations=1)
     

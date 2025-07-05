@@ -553,7 +553,8 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
         contact_point = pc_mask.unsqueeze(-1).where(cp_pc, contact_point)
     
     # Apply contact processing
-    contact_mask = penetration > 0
+    # Include contacts with zero penetration to handle exact touching
+    contact_mask = penetration >= -1e-6  # Small tolerance for numerical stability
     soft_penetration = contact_mask.where(softplus(penetration, beta=10.0), Tensor.zeros_like(penetration))
     
     # Combine with validity mask
@@ -563,7 +564,7 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
     final_ids_a = final_mask.where(ids_a, -1)
     final_ids_b = final_mask.where(ids_b, -1)
     final_normal = final_mask.unsqueeze(-1).where(normal, Tensor.zeros_like(normal))
-    final_penetration = final_mask.where(soft_penetration, Tensor.zeros_like(penetration))
+    final_penetration = final_mask.where(penetration, Tensor.zeros_like(penetration))
     
     compliance_tensor = Tensor.full((MAX_CONTACTS_PER_STEP,), compliance)
     final_compliance = final_mask.where(compliance_tensor, Tensor.zeros_like(compliance_tensor))

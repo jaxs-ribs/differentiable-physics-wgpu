@@ -14,10 +14,9 @@ def solve_constraints(x_pred: Tensor, q_pred: Tensor, contacts: dict,
     compliance = contacts['compliance']
     contact_count = contacts.get('contact_count', Tensor.zeros(1))
     
-    # Create valid mask based on both invalid IDs and contact count
-    # All contacts beyond contact_count are invalid
-    contact_indices = Tensor.arange(ids_a.shape[0])
-    valid_mask = (ids_a != -1) & (contact_indices < contact_count)
+    # Create valid mask based on invalid IDs
+    # Contacts with ids_a == -1 are invalid
+    valid_mask = ids_a != -1
     
     num_contacts = ids_a.shape[0]
     
