@@ -19,7 +19,8 @@ def test_no_position_change_zero_velocity():
     v_new, omega_new = reconcile_velocities(x_proj, q_proj, x_old, q_old, v_old, omega_old, dt)
     
     # Velocities should be zero since no position change
-    np.testing.assert_allclose(v_new.numpy(), [[0.0, 0.0, 0.0]], rtol=1e-5)
+    # Using absolute tolerance due to floating point precision
+    np.testing.assert_allclose(v_new.numpy(), [[0.0, 0.0, 0.0]], atol=1e-5)
     np.testing.assert_allclose(omega_new.numpy(), [[0.0, 0.0, 0.0]], atol=1e-5)
 
 

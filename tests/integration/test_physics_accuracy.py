@@ -51,6 +51,8 @@ def test_falling_sphere_settles_correctly():
         gravity=np.array([0, -9.81, 0]),
         dt=0.004,  # Small timestep for accuracy
         restitution=0.0,  # No bounce
+        # TEMPORARY: Parameters reduced from original values to work with Jacobi solver
+        # Original: solver_iterations=32, contact_compliance=0.0
         solver_iterations=2,  # Minimal iterations for Jacobi solver
         contact_compliance=0.0001  # Stiff contacts
     )
@@ -80,13 +82,22 @@ def test_falling_sphere_settles_correctly():
     expected_y = 0.55
     
     # Assert sphere settled at correct height
-    # TODO: With current Jacobi-style solver, sphere settles ~0.05 units high.
-    # A proper Gauss-Seidel XPBD implementation that re-evaluates constraints
-    # each iteration would achieve better accuracy.
+    # WARNING: These tolerances are TEMPORARILY RELAXED to accommodate limitations
+    # of the current Jacobi-style solver implementation.
+    # 
+    # Current solver issues:
+    # - Does NOT re-evaluate penetration depths between iterations
+    # - Applies same correction repeatedly, causing instability
+    # - Results in ~0.05 unit settling error and residual oscillations
+    #
+    # TODO: Implement proper Gauss-Seidel XPBD solver that:
+    # - Re-evaluates constraint violations each iteration
+    # - Can handle iterations=32 and compliance=0.0 without instability
+    # - Achieves position accuracy < 0.01 and velocity < 0.01
     assert abs(sphere_final_y - expected_y) < 0.06, \
         f"Sphere settled at incorrect height: {sphere_final_y:.4f} (expected {expected_y})"
     
-    # Assert sphere is mostly at rest (some oscillation expected with Jacobi solver)
+    # TEMPORARY: Velocity tolerance relaxed from 0.01 to 1.0
     assert abs(sphere_final_vy) < 1.0, \
         f"Sphere velocity too high: v_y={sphere_final_vy:.4f}"
 

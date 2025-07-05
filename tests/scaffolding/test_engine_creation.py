@@ -83,7 +83,8 @@ def test_engine_jit_compilation():
     
     # The engine should have JIT-compiled functions
     assert engine.jitted_step is not None
-    assert engine.jitted_n_step is not None
+    # jitted_n_step is created on first use, not at initialization
+    assert engine.jitted_n_step is None  # Should be None until first run_simulation call
 
 
 def test_stack_scene_creation(multi_body_stack_scene):
