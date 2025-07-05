@@ -3,17 +3,21 @@ from tinygrad import Tensor, dtypes
 
 def solve_constraints(x_pred: Tensor, q_pred: Tensor, contacts: dict, 
                      inv_mass: Tensor, inv_inertia: Tensor, dt: float,
-                     iterations: int = 8) -> tuple[Tensor, Tensor, Tensor]:
-    if 'ids_a' not in contacts or contacts['ids_a'].shape[0] == 0:
-        return x_pred, q_pred, Tensor.zeros((0,))
+                     iterations: int = 8) -> tuple[Tensor, Tensor]:
+    if 'ids_a' not in contacts:
+        return x_pred, q_pred
     
     ids_a = contacts['ids_a']
     ids_b = contacts['ids_b']
     normals = contacts['normal']
     penetrations = contacts['p']
     compliance = contacts['compliance']
+    contact_count = contacts.get('contact_count', Tensor.zeros(1))
     
-    valid_mask = ids_a != -1
+    # Create valid mask based on both invalid IDs and contact count
+    # All contacts beyond contact_count are invalid
+    contact_indices = Tensor.arange(ids_a.shape[0])
+    valid_mask = (ids_a != -1) & (contact_indices < contact_count)
     
     num_contacts = ids_a.shape[0]
     
@@ -27,7 +31,7 @@ def solve_constraints(x_pred: Tensor, q_pred: Tensor, contacts: dict,
             compliance, inv_mass, lambda_acc, dt, valid_mask
         )
     
-    return x_corrected, q_pred, lambda_acc
+    return x_corrected, q_pred
 
 
 def solver_iteration(x: Tensor, ids_a: Tensor, ids_b: Tensor, normals: Tensor, 
@@ -38,7 +42,7 @@ def solver_iteration(x: Tensor, ids_a: Tensor, ids_b: Tensor, normals: Tensor,
     
     gen_inv_mass = valid_mask.where(inv_mass_a + inv_mass_b, Tensor.ones_like(inv_mass_a))
     
-    C = valid_mask.where(-penetrations, Tensor.zeros_like(penetrations))
+    C = valid_mask.where(penetrations, Tensor.zeros_like(penetrations))
     
     alpha = compliance
     dt_squared = dt * dt
@@ -63,18 +67,31 @@ def solver_iteration(x: Tensor, ids_a: Tensor, ids_b: Tensor, normals: Tensor,
 def apply_position_corrections(x: Tensor, ids_a: Tensor, ids_b: Tensor, 
                               delta_x_a: Tensor, delta_x_b: Tensor,
                               valid_mask: Tensor) -> Tensor:
-    corrections = Tensor.zeros_like(x)
+    # JIT-compatible scatter-add implementation using one-hot encoding
+    num_bodies = x.shape[0]
+    num_contacts = ids_a.shape[0]  # Always MAX_CONTACTS_PER_STEP
     
-    valid_ids_a = valid_mask.where(ids_a, 0)
-    valid_ids_b = valid_mask.where(ids_b, 0)
+    # Create one-hot masks
+    # mask_a[i, j] = 1 if contact i's first body is body j
+    body_indices = Tensor.arange(num_bodies).unsqueeze(0)  # Shape: (1, num_bodies)
+    ids_a_expanded = ids_a.unsqueeze(1)  # Shape: (num_contacts, 1)
+    ids_b_expanded = ids_b.unsqueeze(1)  # Shape: (num_contacts, 1)
     
-    masked_delta_a = valid_mask.unsqueeze(-1).where(delta_x_a, Tensor.zeros_like(delta_x_a))
-    masked_delta_b = valid_mask.unsqueeze(-1).where(delta_x_b, Tensor.zeros_like(delta_x_b))
+    # Create masks and apply valid_mask to zero out invalid contacts
+    mask_a = (ids_a_expanded == body_indices) & valid_mask.unsqueeze(1)  # Shape: (num_contacts, num_bodies)
+    mask_b = (ids_b_expanded == body_indices) & valid_mask.unsqueeze(1)  # Shape: (num_contacts, num_bodies)
     
-    idx_a_expanded = valid_ids_a.unsqueeze(-1).expand(-1, 3)
-    idx_b_expanded = valid_ids_b.unsqueeze(-1).expand(-1, 3)
+    # Convert boolean masks to float for matrix multiplication
+    mask_a = mask_a.float()
+    mask_b = mask_b.float()
     
-    corrections = corrections.scatter_reduce(0, idx_a_expanded, masked_delta_a, 'sum')
-    corrections = corrections.scatter_reduce(0, idx_b_expanded, masked_delta_b, 'sum')
+    # Perform scatter-add via matrix multiplication
+    # mask_a.T @ delta_x_a gives the sum of all delta_x_a for each body
+    corrections_a = mask_a.transpose(0, 1).matmul(delta_x_a)  # Shape: (num_bodies, 3)
+    corrections_b = mask_b.transpose(0, 1).matmul(delta_x_b)  # Shape: (num_bodies, 3)
     
-    return x + corrections
+    # Total corrections
+    total_corrections = corrections_a + corrections_b
+    
+    # Apply corrections
+    return x + total_corrections

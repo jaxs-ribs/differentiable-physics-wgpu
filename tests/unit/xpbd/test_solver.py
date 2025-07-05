@@ -48,7 +48,8 @@ def test_solve_constraints_single_contact():
         'ids_b': Tensor([1], dtype=dtypes.int32),
         'normal': Tensor([[0.0, 1.0, 0.0]]),  # Normal pointing up
         'p': Tensor([0.1]),  # Penetration depth (softplus'd)
-        'compliance': Tensor([0.0])  # Rigid contact
+        'compliance': Tensor([0.0]),  # Rigid contact
+        'contact_count': Tensor([1])  # One valid contact
     }
     
     x_new, q_new = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt, iterations=1)

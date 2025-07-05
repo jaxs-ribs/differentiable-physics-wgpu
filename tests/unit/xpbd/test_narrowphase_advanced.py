@@ -37,10 +37,11 @@ def test_box_sphere_collision():
     x_box = Tensor([[0.0, 0.0, 0.0]])
     x_sphere = Tensor([[2.0, 0.0, 0.0]])
     q_box = Tensor([[1.0, 0.0, 0.0, 0.0]])
+    q_sphere = Tensor([[1.0, 0.0, 0.0, 0.0]])  # Identity quaternion
     params_box = Tensor([[1.0, 1.0, 1.0]])  # Half-extents
     params_sphere = Tensor([[0.5, 0.0, 0.0]])  # Radius = 0.5
     
-    penetration, normal, contact_point = box_sphere_test(x_box, x_sphere, q_box, params_box, params_sphere)
+    penetration, normal, contact_point = box_sphere_test(x_box, x_sphere, q_box, q_sphere, params_box, params_sphere)
     
     # Expected: sphere touches box face, penetration = 0.5 - (2 - 1) = -0.5 (no collision)
     assert penetration.numpy()[0] < 0
@@ -52,10 +53,11 @@ def test_box_sphere_collision_with_penetration():
     x_box = Tensor([[0.0, 0.0, 0.0]])
     x_sphere = Tensor([[1.3, 0.0, 0.0]])
     q_box = Tensor([[1.0, 0.0, 0.0, 0.0]])
+    q_sphere = Tensor([[1.0, 0.0, 0.0, 0.0]])  # Identity quaternion
     params_box = Tensor([[1.0, 1.0, 1.0]])
     params_sphere = Tensor([[0.5, 0.0, 0.0]])
     
-    penetration, normal, contact_point = box_sphere_test(x_box, x_sphere, q_box, params_box, params_sphere)
+    penetration, normal, contact_point = box_sphere_test(x_box, x_sphere, q_box, q_sphere, params_box, params_sphere)
     
     # Expected: penetration = 0.5 - (1.3 - 1) = 0.2
     assert np.isclose(penetration.numpy()[0], 0.2, atol=1e-6)
@@ -86,10 +88,11 @@ def test_capsule_sphere_collision():
     x_capsule = Tensor([[0.0, 0.0, 0.0]])
     x_sphere = Tensor([[1.5, 0.0, 0.0]])
     q_capsule = Tensor([[1.0, 0.0, 0.0, 0.0]])
+    q_sphere = Tensor([[1.0, 0.0, 0.0, 0.0]])  # Identity quaternion
     params_capsule = Tensor([[0.5, 1.0, 0.0]])  # radius=0.5, half_height=1.0
     params_sphere = Tensor([[0.7, 0.0, 0.0]])  # radius=0.7
     
-    penetration, normal, contact_point = capsule_sphere_test(x_capsule, x_sphere, q_capsule, params_capsule, params_sphere)
+    penetration, normal, contact_point = capsule_sphere_test(x_capsule, x_sphere, q_capsule, q_sphere, params_capsule, params_sphere)
     
     # Expected: distance = 1.5, radii sum = 0.5 + 0.7 = 1.2
     # Penetration = 1.2 - 1.5 = -0.3 (no collision)
@@ -166,6 +169,7 @@ def test_multiple_bodies_soa():
         [11.0, 0.0, 0.0]  # Will collide
     ])
     q_box = Tensor([[1.0, 0.0, 0.0, 0.0]] * 3)
+    q_sphere = Tensor([[1.0, 0.0, 0.0, 0.0]] * 3)  # Identity quaternions
     params_box = Tensor([[1.0, 1.0, 1.0]] * 3)
     params_sphere = Tensor([
         [0.5, 0.0, 0.0],  # radius = 0.5
@@ -173,7 +177,7 @@ def test_multiple_bodies_soa():
         [0.4, 0.0, 0.0]   # radius = 0.4
     ])
     
-    penetration, normal, contact_point = box_sphere_test(x_box, x_sphere, q_box, params_box, params_sphere)
+    penetration, normal, contact_point = box_sphere_test(x_box, x_sphere, q_box, q_sphere, params_box, params_sphere)
     
     # Check first pair: penetration = 0.5 - (1.2 - 1.0) = 0.3
     assert np.isclose(penetration.numpy()[0], 0.3, atol=1e-6)

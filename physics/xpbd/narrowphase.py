@@ -7,11 +7,12 @@ import numpy as np
 from tinygrad import Tensor, dtypes
 from physics.types import ShapeType
 from physics.math_utils import apply_quaternion_to_vector
+from .broadphase_consts import MAX_CONTACTS_PER_STEP
 
 
 # Configuration constants
 PLANE_THICKNESS_THRESHOLD = 0.1  # Boxes thinner than this are treated as planes
-MAX_SHAPE_TYPE = 10  # Must be larger than the maximum ShapeType enum value
+MAX_SHAPE_TYPE = 5  # Must be larger than the maximum ShapeType enum value
 
 # Global collision function registry
 COLLISION_TABLE: Dict[Tuple[int, int], Callable] = {}
@@ -370,7 +371,7 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
                      shape_type: Tensor, shape_params: Tensor, friction: Tensor, 
                      compliance: float = 0.001, plane_threshold: float = None) -> dict:
     """
-    Generate contact information for collision pairs using table-driven dispatch.
+    Generate contact information for collision pairs using vectorized dispatch.
     
     Args:
         x: Positions (N, 3)
@@ -388,33 +389,35 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
     if plane_threshold is None:
         plane_threshold = PLANE_THICKNESS_THRESHOLD
     
-    # Early exit for empty pairs
+    # First, ensure candidate_pairs is exactly MAX_CONTACTS_PER_STEP in size
+    input_size = candidate_pairs.shape[0]
+    if input_size < MAX_CONTACTS_PER_STEP:
+        # Pad with invalid pairs
+        pad_size = MAX_CONTACTS_PER_STEP - input_size
+        pad_pairs = Tensor.full((pad_size, 2), -1, dtype=dtypes.int32)
+        candidate_pairs = candidate_pairs.cat(pad_pairs, dim=0)
+    else:
+        # Truncate to MAX_CONTACTS_PER_STEP
+        candidate_pairs = candidate_pairs[:MAX_CONTACTS_PER_STEP]
+    
+    # Now all operations work on fixed-size tensors
     valid_mask = candidate_pairs[:, 0] != -1
-    if candidate_pairs.shape[0] == 0 or not valid_mask.any().numpy():
-        return {
-            'ids_a': Tensor.zeros((0,), dtype=dtypes.int32),
-            'ids_b': Tensor.zeros((0,), dtype=dtypes.int32),
-            'normal': Tensor.zeros((0, 3)),
-            'p': Tensor.zeros((0,)),
-            'compliance': Tensor.zeros((0,)),
-            'friction': Tensor.zeros((0,))
-        }
     
     # Extract pair indices
     ids_a = candidate_pairs[:, 0]
     ids_b = candidate_pairs[:, 1]
     
-    # Gather shape data
-    shape_type_a = shape_type.gather(0, ids_a)
-    shape_type_b = shape_type.gather(0, ids_b)
+    # For invalid pairs, use index 0 (will be masked out later)
+    safe_ids_a = valid_mask.where(ids_a, 0)
+    safe_ids_b = valid_mask.where(ids_b, 0)
+    
+    # Gather shape data using safe indices
+    shape_type_a = shape_type.gather(0, safe_ids_a)
+    shape_type_b = shape_type.gather(0, safe_ids_b)
     
     # Pre-compute plane detection and rewrite shape types
-    params_a = shape_params.gather(0, ids_a.unsqueeze(-1).expand(-1, 3))
-    params_b = shape_params.gather(0, ids_b.unsqueeze(-1).expand(-1, 3))
-    
-    # Validate shape parameters width
-    assert params_a.shape[-1] >= 3, f"Shape params must have width >= 3, got {params_a.shape[-1]}"
-    assert params_b.shape[-1] >= 3, f"Shape params must have width >= 3, got {params_b.shape[-1]}"
+    params_a = shape_params.gather(0, safe_ids_a.unsqueeze(-1).expand(-1, 3))
+    params_b = shape_params.gather(0, safe_ids_b.unsqueeze(-1).expand(-1, 3))
     
     is_plane_a = (shape_type_a == ShapeType.BOX) & (params_a[:, 1] <= plane_threshold)
     is_plane_b = (shape_type_b == ShapeType.BOX) & (params_b[:, 1] <= plane_threshold)
@@ -423,75 +426,131 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
     shape_type_b = is_plane_b.where(ShapeType.PLANE, shape_type_b)
     
     # Gather remaining data
-    x_a = x.gather(0, ids_a.unsqueeze(-1).expand(-1, 3))
-    x_b = x.gather(0, ids_b.unsqueeze(-1).expand(-1, 3))
-    q_a = q.gather(0, ids_a.unsqueeze(-1).expand(-1, 4))
-    q_b = q.gather(0, ids_b.unsqueeze(-1).expand(-1, 4))
+    x_a = x.gather(0, safe_ids_a.unsqueeze(-1).expand(-1, 3))
+    x_b = x.gather(0, safe_ids_b.unsqueeze(-1).expand(-1, 3))
+    q_a = q.gather(0, safe_ids_a.unsqueeze(-1).expand(-1, 4))
+    q_b = q.gather(0, safe_ids_b.unsqueeze(-1).expand(-1, 4))
     
     # Calculate contact friction
-    friction_a = friction.gather(0, ids_a)
-    friction_b = friction.gather(0, ids_b)
+    friction_a = friction.gather(0, safe_ids_a)
+    friction_b = friction.gather(0, safe_ids_b)
     contact_friction = friction_a * friction_b
     
-    # Initialize outputs
-    batch_size = x_a.shape[0]
-    penetration = Tensor.zeros((batch_size,))
-    normal = Tensor.zeros((batch_size, 3))
-    contact_point = Tensor.zeros((batch_size, 3))
+    # Initialize outputs with fixed size MAX_CONTACTS_PER_STEP
+    penetration = Tensor.zeros((MAX_CONTACTS_PER_STEP,))
+    normal = Tensor.zeros((MAX_CONTACTS_PER_STEP, 3))
+    contact_point = Tensor.zeros((MAX_CONTACTS_PER_STEP, 3))
     
-    # Process all pairs - avoiding nonzero and scatter which don't exist in tinygrad
-    # For each possible shape type combination, test all pairs
-    for type_a_val in range(MAX_SHAPE_TYPE):
-        for type_b_val in range(MAX_SHAPE_TYPE):
-            # Get canonical ordering
-            type_lo = min(type_a_val, type_b_val)
-            type_hi = max(type_a_val, type_b_val)
-            lookup_key = (type_lo, type_hi)
-            
-            if lookup_key not in COLLISION_TABLE:
-                continue
-            
-            # Build mask for this pair type
-            mask = (shape_type_a == type_a_val) & (shape_type_b == type_b_val)
-            
-            if not mask.any().numpy():
-                continue
-            
-            # Check if we need to swap inputs
-            swapped = type_a_val > type_b_val
-            
-            # Process with swapping if needed
-            if swapped:
-                x_a_test = x_b
-                x_b_test = x_a
-                q_a_test = q_b
-                q_b_test = q_a
-                params_a_test = params_b
-                params_b_test = params_a
-            else:
-                x_a_test = x_a
-                x_b_test = x_b
-                q_a_test = q_a
-                q_b_test = q_b
-                params_a_test = params_a
-                params_b_test = params_b
-            
-            # Call collision test on all pairs
-            test_func = COLLISION_TABLE[lookup_key]
-            pen_test, norm_test, cp_test = test_func(
-                x_a_test, x_b_test, q_a_test, q_b_test, 
-                params_a_test, params_b_test
-            )
-            
-            # Flip normal if swapped
-            if swapped:
-                norm_test = -norm_test
-            
-            # Use mask to update results
-            mask_expanded = mask.unsqueeze(-1)
-            penetration = mask.where(pen_test, penetration)
-            normal = mask_expanded.where(norm_test, normal)
-            contact_point = mask_expanded.where(cp_test, contact_point)
+    # VECTORIZED DISPATCH: Execute all collision tests in parallel and mask results
+    
+    # Sphere-Sphere
+    ss_mask = (shape_type_a == ShapeType.SPHERE) & (shape_type_b == ShapeType.SPHERE)
+    if (ShapeType.SPHERE, ShapeType.SPHERE) in COLLISION_TABLE:
+        pen_ss, norm_ss, cp_ss = sphere_sphere_test(x_a, x_b, q_a, q_b, params_a, params_b)
+        penetration = ss_mask.where(pen_ss, penetration)
+        normal = ss_mask.unsqueeze(-1).where(norm_ss, normal)
+        contact_point = ss_mask.unsqueeze(-1).where(cp_ss, contact_point)
+    
+    # Sphere-Box (and Box-Sphere)
+    sb_mask = (shape_type_a == ShapeType.SPHERE) & (shape_type_b == ShapeType.BOX)
+    bs_mask = (shape_type_a == ShapeType.BOX) & (shape_type_b == ShapeType.SPHERE)
+    if (ShapeType.BOX, ShapeType.SPHERE) in COLLISION_TABLE:
+        # Forward case: sphere-box
+        pen_sb, norm_sb, cp_sb = box_sphere_test(x_b, x_a, q_b, q_a, params_b, params_a)
+        norm_sb = -norm_sb  # Flip normal since we swapped arguments
+        penetration = sb_mask.where(pen_sb, penetration)
+        normal = sb_mask.unsqueeze(-1).where(norm_sb, normal)
+        contact_point = sb_mask.unsqueeze(-1).where(cp_sb, contact_point)
+        
+        # Reverse case: box-sphere
+        pen_bs, norm_bs, cp_bs = box_sphere_test(x_a, x_b, q_a, q_b, params_a, params_b)
+        penetration = bs_mask.where(pen_bs, penetration)
+        normal = bs_mask.unsqueeze(-1).where(norm_bs, normal)
+        contact_point = bs_mask.unsqueeze(-1).where(cp_bs, contact_point)
+    
+    # Box-Box
+    bb_mask = (shape_type_a == ShapeType.BOX) & (shape_type_b == ShapeType.BOX)
+    if (ShapeType.BOX, ShapeType.BOX) in COLLISION_TABLE:
+        pen_bb, norm_bb, cp_bb = box_box_test(x_a, x_b, q_a, q_b, params_a, params_b)
+        penetration = bb_mask.where(pen_bb, penetration)
+        normal = bb_mask.unsqueeze(-1).where(norm_bb, normal)
+        contact_point = bb_mask.unsqueeze(-1).where(cp_bb, contact_point)
+    
+    # Sphere-Plane (and Plane-Sphere)
+    sp_mask = (shape_type_a == ShapeType.SPHERE) & (shape_type_b == ShapeType.PLANE)
+    ps_mask = (shape_type_a == ShapeType.PLANE) & (shape_type_b == ShapeType.SPHERE)
+    if (ShapeType.SPHERE, ShapeType.PLANE) in COLLISION_TABLE:
+        # Forward case: sphere-plane
+        pen_sp, norm_sp, cp_sp = sphere_plane_test(x_a, x_b, q_a, q_b, params_a, params_b)
+        penetration = sp_mask.where(pen_sp, penetration)
+        normal = sp_mask.unsqueeze(-1).where(norm_sp, normal)
+        contact_point = sp_mask.unsqueeze(-1).where(cp_sp, contact_point)
+        
+        # Reverse case: plane-sphere
+        pen_ps, norm_ps, cp_ps = sphere_plane_test(x_b, x_a, q_b, q_a, params_b, params_a)
+        norm_ps = -norm_ps  # Flip normal since we swapped
+        penetration = ps_mask.where(pen_ps, penetration)
+        normal = ps_mask.unsqueeze(-1).where(norm_ps, normal)
+        contact_point = ps_mask.unsqueeze(-1).where(cp_ps, contact_point)
+    
+    # Capsule-Capsule
+    cc_mask = (shape_type_a == ShapeType.CAPSULE) & (shape_type_b == ShapeType.CAPSULE)
+    if (ShapeType.CAPSULE, ShapeType.CAPSULE) in COLLISION_TABLE:
+        pen_cc, norm_cc, cp_cc = capsule_capsule_test(x_a, x_b, q_a, q_b, params_a, params_b)
+        penetration = cc_mask.where(pen_cc, penetration)
+        normal = cc_mask.unsqueeze(-1).where(norm_cc, normal)
+        contact_point = cc_mask.unsqueeze(-1).where(cp_cc, contact_point)
+    
+    # Capsule-Sphere (and Sphere-Capsule)
+    cs_mask = (shape_type_a == ShapeType.CAPSULE) & (shape_type_b == ShapeType.SPHERE)
+    sc_mask = (shape_type_a == ShapeType.SPHERE) & (shape_type_b == ShapeType.CAPSULE)
+    if (ShapeType.CAPSULE, ShapeType.SPHERE) in COLLISION_TABLE:
+        # Forward case: capsule-sphere
+        pen_cs, norm_cs, cp_cs = capsule_sphere_test(x_a, x_b, q_a, q_b, params_a, params_b)
+        penetration = cs_mask.where(pen_cs, penetration)
+        normal = cs_mask.unsqueeze(-1).where(norm_cs, normal)
+        contact_point = cs_mask.unsqueeze(-1).where(cp_cs, contact_point)
+        
+        # Reverse case: sphere-capsule
+        pen_sc, norm_sc, cp_sc = capsule_sphere_test(x_b, x_a, q_b, q_a, params_b, params_a)
+        norm_sc = -norm_sc  # Flip normal since we swapped
+        penetration = sc_mask.where(pen_sc, penetration)
+        normal = sc_mask.unsqueeze(-1).where(norm_sc, normal)
+        contact_point = sc_mask.unsqueeze(-1).where(cp_sc, contact_point)
+    
+    # Capsule-Box (and Box-Capsule)
+    cb_mask = (shape_type_a == ShapeType.CAPSULE) & (shape_type_b == ShapeType.BOX)
+    bc_mask = (shape_type_a == ShapeType.BOX) & (shape_type_b == ShapeType.CAPSULE)
+    if (ShapeType.CAPSULE, ShapeType.BOX) in COLLISION_TABLE:
+        # Forward case: capsule-box
+        pen_cb, norm_cb, cp_cb = capsule_box_test(x_a, x_b, q_a, q_b, params_a, params_b)
+        penetration = cb_mask.where(pen_cb, penetration)
+        normal = cb_mask.unsqueeze(-1).where(norm_cb, normal)
+        contact_point = cb_mask.unsqueeze(-1).where(cp_cb, contact_point)
+        
+        # Reverse case: box-capsule
+        pen_bc, norm_bc, cp_bc = capsule_box_test(x_b, x_a, q_b, q_a, params_b, params_a)
+        norm_bc = -norm_bc  # Flip normal since we swapped
+        penetration = bc_mask.where(pen_bc, penetration)
+        normal = bc_mask.unsqueeze(-1).where(norm_bc, normal)
+        contact_point = bc_mask.unsqueeze(-1).where(cp_bc, contact_point)
+    
+    # Capsule-Plane (and Plane-Capsule)
+    cp_mask = (shape_type_a == ShapeType.CAPSULE) & (shape_type_b == ShapeType.PLANE)
+    pc_mask = (shape_type_a == ShapeType.PLANE) & (shape_type_b == ShapeType.CAPSULE)
+    if (ShapeType.CAPSULE, ShapeType.PLANE) in COLLISION_TABLE:
+        # Forward case: capsule-plane
+        pen_cp, norm_cp, cp_cp = capsule_plane_test(x_a, x_b, q_a, q_b, params_a, params_b)
+        penetration = cp_mask.where(pen_cp, penetration)
+        normal = cp_mask.unsqueeze(-1).where(norm_cp, normal)
+        contact_point = cp_mask.unsqueeze(-1).where(cp_cp, contact_point)
+        
+        # Reverse case: plane-capsule
+        pen_pc, norm_pc, cp_pc = capsule_plane_test(x_b, x_a, q_b, q_a, params_b, params_a)
+        norm_pc = -norm_pc  # Flip normal since we swapped
+        penetration = pc_mask.where(pen_pc, penetration)
+        normal = pc_mask.unsqueeze(-1).where(norm_pc, normal)
+        contact_point = pc_mask.unsqueeze(-1).where(cp_pc, contact_point)
     
     # Apply contact processing
     contact_mask = penetration > 0
@@ -500,21 +559,25 @@ def generate_contacts(x: Tensor, q: Tensor, candidate_pairs: Tensor,
     # Combine with validity mask
     final_mask = contact_mask & valid_mask
     
-    # Create final outputs
+    # All tensors are already MAX_CONTACTS_PER_STEP in size, so just apply masks
     final_ids_a = final_mask.where(ids_a, -1)
     final_ids_b = final_mask.where(ids_b, -1)
     final_normal = final_mask.unsqueeze(-1).where(normal, Tensor.zeros_like(normal))
-    final_physical_penetration = final_mask.where(penetration, Tensor.zeros_like(penetration))
+    final_penetration = final_mask.where(soft_penetration, Tensor.zeros_like(penetration))
     
-    compliance_tensor = Tensor.full((ids_a.shape[0],), compliance)
+    compliance_tensor = Tensor.full((MAX_CONTACTS_PER_STEP,), compliance)
     final_compliance = final_mask.where(compliance_tensor, Tensor.zeros_like(compliance_tensor))
     final_friction = final_mask.where(contact_friction, Tensor.zeros_like(contact_friction))
+    
+    # Count valid contacts
+    num_actual_contacts = final_mask.sum()
     
     return {
         'ids_a': final_ids_a,
         'ids_b': final_ids_b,
         'normal': final_normal,
-        'p': final_physical_penetration,
+        'p': final_penetration,
         'compliance': final_compliance,
-        'friction': final_friction
+        'friction': final_friction,
+        'contact_count': num_actual_contacts
     }

@@ -48,7 +48,12 @@ def test_sphere_drop_penetration():
     num_steps = 250
     max_penetration = 0.0
     
-    for _ in range(num_steps):
+    # Debug: check initial positions
+    initial_state = engine.get_state()
+    print(f"Initial sphere position: {initial_state['x'][1]}")
+    print(f"Initial plane position: {initial_state['x'][0]}")
+    
+    for step in range(num_steps):
         engine.step()
         state = engine.get_state()
         
@@ -59,6 +64,10 @@ def test_sphere_drop_penetration():
         penetration = plane_top - sphere_bottom
         if penetration > 0:
             max_penetration = max(max_penetration, penetration)
+        
+        # Debug: print position every 50 steps
+        if step % 50 == 0:
+            print(f"Step {step}: sphere y={sphere_pos[1]:.4f}, penetration={penetration:.4f}")
     
     tolerance_mm = 0.5
     tolerance_m = tolerance_mm / 1000.0

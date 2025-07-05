@@ -30,3 +30,6 @@ NEIGHBOR_OFFSETS = [
 MIN_CELL_SIZE = 0.1
 MAX_CELL_SIZE = 10.0
 CELL_SIZE_MULTIPLIER = 2.0  # Cell size = largest_aabb * multiplier
+
+# Fixed-size contact buffer to avoid JIT cache invalidation
+MAX_CONTACTS_PER_STEP = 64  # Maximum number of contacts in the fixed-size buffer

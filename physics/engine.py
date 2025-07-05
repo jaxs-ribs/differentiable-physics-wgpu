@@ -15,8 +15,11 @@ def _physics_step_static(x: Tensor, q: Tensor, v: Tensor, omega: Tensor,
   x_pred, q_pred, v_new, omega_new = predict_state(x, q, v, omega, inv_mass, inv_inertia, gravity, dt)
   candidate_pairs = uniform_spatial_hash(x_pred, shape_type, shape_params)
   contacts = generate_contacts(x_pred, q_pred, candidate_pairs, shape_type, shape_params, friction, contact_compliance)
-  x_proj, q_proj, lambda_acc = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt, iterations=solver_iterations)
+  x_proj, q_proj = solve_constraints(x_pred, q_pred, contacts, inv_mass, inv_inertia, dt, iterations=solver_iterations)
   v_reconciled, omega_reconciled = reconcile_velocities(x_proj, q_proj, x_old, q_old, v_new, omega_new, dt)
+  # Create dummy lambda_acc for velocity solver
+  num_contacts = contacts['ids_a'].shape[0] if 'ids_a' in contacts else 0
+  lambda_acc = Tensor.zeros((num_contacts,))
   v_final, omega_final = solve_velocities(v_reconciled, omega_reconciled, contacts, inv_mass, inv_inertia, dt, lambda_acc, restitution)
   return x_proj, q_proj, v_final, omega_final
 
@@ -55,12 +58,9 @@ class TensorPhysicsEngine:
     self.solver_iterations = solver_iterations
     self.contact_compliance = contact_compliance
     
-    self.jitted_n_step = TinyJit(lambda x, q, v, omega, num_steps: _n_step_simulation(
-      x, q, v, omega, self.inv_mass, self.inv_inertia, self.shape_type, self.shape_params, self.friction,
-      self.dt, self.gravity, num_steps, self.restitution, self.solver_iterations, self.contact_compliance))
-    self.jitted_step = TinyJit(lambda x, q, v, omega: _physics_step_static(
-      x, q, v, omega, self.inv_mass, self.inv_inertia, self.shape_type, self.shape_params, self.friction,
-      self.dt, self.gravity, self.restitution, self.solver_iterations, self.contact_compliance))
+    # Create JIT-compiled physics step
+    self.jitted_step = TinyJit(_physics_step_static)
+    self.jitted_n_step = None  # Will be created on first use
     
   def _physics_step(self) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     return _physics_step_static(self.x, self.q, self.v, self.omega, 
@@ -68,16 +68,26 @@ class TensorPhysicsEngine:
                                self.dt, self.gravity, self.restitution, self.solver_iterations, self.contact_compliance)
   
   def run_simulation(self, num_steps: int) -> None:
-    self.x, self.q, self.v, self.omega = self.jitted_n_step(self.x, self.q, self.v, self.omega, num_steps)
+    # Create JIT-compiled n-step function if needed
+    if self.jitted_n_step is None:
+      self.jitted_n_step = TinyJit(_n_step_simulation)
+    
+    self.x, self.q, self.v, self.omega = self.jitted_n_step(
+      self.x, self.q, self.v, self.omega, self.inv_mass, self.inv_inertia,
+      self.shape_type, self.shape_params, self.friction,
+      self.dt, self.gravity, num_steps, self.restitution,
+      self.solver_iterations, self.contact_compliance
+    )
   
   def step(self, dt: float | None = None) -> None:
     if dt is not None and dt != self.dt:
       self.dt = dt
-      self.jitted_step = TinyJit(lambda x, q, v, omega: _physics_step_static(
-        x, q, v, omega, self.inv_mass, self.inv_inertia, self.shape_type, self.shape_params, self.friction,
-        self.dt, self.gravity, self.restitution, self.solver_iterations, self.contact_compliance))
     
-    self.x, self.q, self.v, self.omega = self.jitted_step(self.x, self.q, self.v, self.omega)
+    # Use JIT-compiled step
+    self.x, self.q, self.v, self.omega = self.jitted_step(
+      self.x, self.q, self.v, self.omega, self.inv_mass, self.inv_inertia, 
+      self.shape_type, self.shape_params, self.friction,
+      self.dt, self.gravity, self.restitution, self.solver_iterations, self.contact_compliance)
   
   def get_state(self) -> dict[str, np.ndarray]:
     return {
